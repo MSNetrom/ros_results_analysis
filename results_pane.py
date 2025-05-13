@@ -240,12 +240,12 @@ def process_sceneflow(reader, timestamp, output_path):
         #np.save(output_path / 'sceneflow_vectors.npy', vecs)
         
         # Visualize the scene flow
-        visualize_sceneflow(pts, vecs)
+        visualize_sceneflow(pts, vecs, output_path)
         
     except Exception as e:
         print(f"Error processing sceneflow message: {e}")
 
-def visualize_sceneflow(pts, vecs):
+def visualize_sceneflow(pts, vecs, output_path):
     """
     Visualize scene flow data using Open3D.
     
@@ -337,7 +337,16 @@ def visualize_sceneflow(pts, vecs):
     ctr.convert_from_pinhole_camera_parameters(param)
     # --- End of camera parameter adjustment ---
 
-    vis.run()
+    # Render once
+    vis.poll_events()
+    vis.update_renderer()
+    
+    # Capture the screen image
+    image_path = str(output_path / 'sceneflow_visualization.png')
+    vis.capture_screen_image(image_path, True)
+    print(f"Saved visualization image to {image_path}")
+    
+    # Close the window
     vis.destroy_window()
 
 def additional_processing(reader, timestamp, output_path):
