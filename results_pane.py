@@ -3,6 +3,8 @@ from pathlib import Path
 import os
 import cv2
 import numpy as np
+import open3d as o3d
+from scene_flow_msgs.msg import SceneFlow
 
 from rosbags.highlevel import AnyReader
 from rosbags.typesys import Stores, get_typestore
@@ -48,7 +50,8 @@ def process_timestamp(bag_path, timestamp, output_folder):
         extract_images(reader, target_timestamp, output_path)
         
         # Process sceneflow message
-        #process_sceneflow(reader, target_timestamp, output_path)
+        process_sceneflow(reader, target_timestamp, output_path)
+        #visualize_sceneflow(reader, target_timestamp, output_path)
         
         # Any other processing
         #additional_processing(reader, target_timestamp, output_path)
@@ -172,7 +175,7 @@ def save_image(image_msg, topic_name, output_path):
 
 def process_sceneflow(reader, timestamp, output_path):
     """
-    Process sceneflow message at the specified timestamp.
+    Process sceneflow message at the specified timestamp and visualize with Open3D.
     
     Args:
         reader (AnyReader): Rosbag reader
@@ -180,7 +183,7 @@ def process_sceneflow(reader, timestamp, output_path):
         output_path (Path): Output directory
     """
     # Define the sceneflow topic
-    sceneflow_topic = '/sceneflow'
+    sceneflow_topic = '/scene_flow'
     
     # Find connection for the sceneflow topic
     connections = [x for x in reader.connections if x.topic == sceneflow_topic]
@@ -190,21 +193,152 @@ def process_sceneflow(reader, timestamp, output_path):
         return
     
     # Find message closest to the timestamp
+    closest_diff = float('inf')
+    closest_data = None
+    
     for conn, msg_timestamp, rawdata in reader.messages(connections=connections):
-        if abs(msg_timestamp - timestamp) < 0.1:  # Example threshold
-            # Deserialize message
-            msg = reader.deserialize(rawdata, conn.msgtype)
+        # Calculate time difference in nanoseconds
+        time_diff = abs(msg_timestamp - timestamp)
+        
+        # Update if this message is closer to target timestamp
+        if time_diff < closest_diff:
+            closest_diff = time_diff
+            closest_data = (conn, msg_timestamp, rawdata)
             
-            # Process sceneflow message
-            # TODO: Implement your custom processing here
-            
-            # Save results
-            with open(output_path / 'sceneflow_results.txt', 'w') as f:
-                f.write(f"Sceneflow timestamp: {msg_timestamp}\n")
-                # Add more details from your processed data
-            
-            print(f"Processed sceneflow data saved to {output_path / 'sceneflow_results.txt'}")
+        # Optional optimization: if messages are time-ordered and we've passed 
+        # the target timestamp by a margin, we can stop searching
+        if msg_timestamp > timestamp and time_diff > 2 * closest_diff:
             break
+    
+    if not closest_data:
+        print(f"No sceneflow message found near the requested timestamp")
+        return
+        
+    conn, msg_timestamp, rawdata = closest_data
+    
+    # Deserialize message
+    msg = reader.deserialize(rawdata, conn.msgtype)
+    
+    # Convert to seconds from bag start for display
+    seconds_from_start = (msg_timestamp - reader.start_time) / 1e9
+    target_seconds_from_start = (timestamp - reader.start_time) / 1e9
+    time_diff_seconds = abs(msg_timestamp - timestamp) / 1e9
+    
+    print(f"Processing sceneflow, found at {seconds_from_start:.2f}s (target: {target_seconds_from_start:.2f}s)")
+    print(f"Timestamp diff: {time_diff_seconds:.6f} seconds")
+    
+    # Extract points and flow vectors from the message
+    try:
+        # Convert ROS message data to NumPy arrays
+        pts = np.array([[pt.x, pt.y, pt.z] for pt in msg.points])
+        vecs = np.array([[vec.x, vec.y, vec.z] for vec in msg.flow_vectors])
+        
+        print(f"Received scene flow with {pts.shape[0]} points and {vecs.shape[0]} vectors.")
+        
+        # Save results
+        #np.save(output_path / 'sceneflow_points.npy', pts)
+        #np.save(output_path / 'sceneflow_vectors.npy', vecs)
+        
+        # Visualize the scene flow
+        visualize_sceneflow(pts, vecs)
+        
+    except Exception as e:
+        print(f"Error processing sceneflow message: {e}")
+
+def visualize_sceneflow(pts, vecs):
+    """
+    Visualize scene flow data using Open3D.
+    
+    Args:
+        pts (np.ndarray): Point cloud data, shape (N, 3)
+        vecs (np.ndarray): Flow vectors, shape (N, 3)
+    """
+    # Filter out points where depth (z) is less than 0.1
+    depth_mask = pts[:, 2] >= 0.1
+    pts_filtered = pts[depth_mask]
+    vecs_filtered = vecs[depth_mask]
+
+    # Optionally sample every Nth point/vector if the data is too dense
+    pts_sampled = pts_filtered[::]
+    vecs_sampled = vecs_filtered[::]
+
+    # Create an Open3D point cloud
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(pts_sampled)
+
+    # Build an Open3D LineSet to represent the vectors as arrows/lines
+    arrow_points = []
+    arrow_lines = []
+    arrow_colors = []
+
+    # For each sampled point and its corresponding vector, add a line from the point
+    # to the point plus the vector
+    for p, v in zip(pts_sampled, vecs_sampled):
+        start = p
+        # Optionally adjust scale for visualization of the vector length
+        scale = 0.1
+        end = p + scale * v
+
+        idx_start = len(arrow_points)
+        arrow_points.append(start)
+        idx_end = len(arrow_points)
+        arrow_points.append(end)
+        arrow_lines.append([idx_start, idx_end])
+        # Color the arrow red
+        arrow_colors.append([1.0, 0.0, 0.0])
+
+    # Create an Open3D LineSet for the arrows
+    line_set = o3d.geometry.LineSet()
+    line_set.points = o3d.utility.Vector3dVector(np.array(arrow_points))
+    line_set.lines = o3d.utility.Vector2iVector(np.array(arrow_lines))
+    line_set.colors = o3d.utility.Vector3dVector(np.array(arrow_colors))
+
+    # Use the Visualizer class to enable camera control
+    vis = o3d.visualization.Visualizer()
+    vis.create_window(
+        window_name="Scene Flow Vector Field",
+        width=800,
+        height=600,
+        left=50,
+        top=50
+    )
+    vis.add_geometry(pcd)
+    vis.add_geometry(line_set)
+
+    # Get the ViewControl object and camera parameters
+    ctr = vis.get_view_control()
+    param = ctr.convert_to_pinhole_camera_parameters()
+
+    # --- Set custom camera parameters ---
+    # Define the desired camera position, target (look-at) and up vector
+    camera_position = np.array([0.0, 0.0, 0.0])  # Use floats!
+    lookat = np.array([0.0, 0.0, -1.0])
+    up_direction = np.array([0.0, 1.0, 0.0])
+
+    # Compute the new camera coordinate frame
+    # Forward vector (from camera towards target)
+    forward = (lookat - camera_position)
+    forward /= np.linalg.norm(forward)
+    # Right vector:
+    right = np.cross(forward, up_direction)
+    right /= np.linalg.norm(right)
+    # Recompute the orthogonal up vector
+    up = np.cross(right, forward)
+
+    # Build the rotation matrix from world to camera coordinates
+    R = np.stack((right, up, -forward), axis=0)  # 3x3 rotation
+    T = -R @ camera_position.reshape(3, 1)
+    extrinsic = np.eye(4)
+    extrinsic[:3, :3] = R
+    extrinsic[:3, 3:] = T
+
+    # Assign our modified extrinsic matrix to the camera parameters
+    param.extrinsic = extrinsic
+    ctr.convert_from_pinhole_camera_parameters(param)
+    # --- End of camera parameter adjustment ---
+
+    vis.run()
+    vis.destroy_window()
 
 def additional_processing(reader, timestamp, output_path):
     """
