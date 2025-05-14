@@ -8,6 +8,9 @@ from scene_flow_msgs.msg import SceneFlow
 
 from rosbags.highlevel import AnyReader
 from rosbags.typesys import Stores, get_typestore
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from datetime import datetime, timedelta
 
 def process_timestamp(bag_path, timestamp, output_folder):
     """
@@ -50,11 +53,11 @@ def process_timestamp(bag_path, timestamp, output_folder):
         extract_images(reader, target_timestamp, output_path)
         
         # Process sceneflow message
-        process_sceneflow(reader, target_timestamp, output_path)
+        #process_sceneflow(reader, target_timestamp, output_path)
         #visualize_sceneflow(reader, target_timestamp, output_path)
         
         # Any other processing
-        #additional_processing(reader, target_timestamp, output_path)
+        additional_processing(reader, target_timestamp, output_path)
     
     print(f"Processing complete. Results saved to {output_path}")
 
@@ -374,6 +377,103 @@ def visualize_sceneflow(pts, vecs, output_path):
     # Close the window
     vis.destroy_window()
 
+def plot_min_image_values(reader, timestamp, output_path, time_range=5.0):
+    """
+    Plot the minimum values of float images around the given timestamp.
+    
+    Args:
+        reader (AnyReader): Rosbag reader
+        timestamp (float): Target timestamp in nanoseconds
+        output_path (Path): Output directory
+        time_range (float): Time range in seconds before and after the timestamp
+    """
+    # Define the image topics to track
+    topics = ['/raw_h_image', '/raw_psi_image']
+    
+    # Find connections for the image topics
+    connections = [x for x in reader.connections if x.topic in topics]
+    
+    if not connections:
+        print(f"No image topics found matching {topics}")
+        return
+    
+    # Define time range bounds
+    start_time = timestamp - int(time_range * 1e9)  # Convert seconds to nanoseconds
+    end_time = timestamp + int(time_range * 1e9)    # Convert seconds to nanoseconds
+    
+    # Dictionary to store results for each topic
+    results = {topic: {'timestamps': [], 'min_values': []} for topic in topics}
+    
+    # Process messages within the time range
+    for connection in connections:
+        topic = connection.topic
+        print(f"Processing {topic} for time series...")
+        
+        for conn, msg_timestamp, rawdata in reader.messages(connections=[connection]):
+            # Skip messages outside our time range
+            if msg_timestamp < start_time or msg_timestamp > end_time:
+                continue
+            
+            # Deserialize message
+            msg = reader.deserialize(rawdata, conn.msgtype)
+            
+            # Convert timestamp to seconds from the start of the bag
+            seconds_from_start = (msg_timestamp - reader.start_time) / 1e9
+            
+            # Process image as 32-bit float
+            try:
+                # Assuming the data is a 32-bit float image
+                float_img = np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
+                
+                # Calculate min value
+                min_value = float_img.min()
+                
+                # Store result
+                results[topic]['timestamps'].append(seconds_from_start)
+                results[topic]['min_values'].append(min_value)
+                
+            except Exception as e:
+                print(f"Error processing {topic} at {seconds_from_start:.2f}s: {e}")
+    
+    # Create the plot
+    plt.figure(figsize=(12, 6))
+    
+    # Target timestamp in seconds from start
+    target_seconds = (timestamp - reader.start_time) / 1e9
+    
+    colors = {'/raw_h_image': 'blue', '/raw_psi_image': 'red'}
+    labels = {'/raw_h_image': 'H Image', '/raw_psi_image': 'PSI Image'}
+    
+    # Plot data for each topic
+    for topic in topics:
+        if results[topic]['timestamps']:
+            plt.plot(
+                results[topic]['timestamps'], 
+                results[topic]['min_values'],
+                marker='o',
+                linestyle='-',
+                color=colors[topic],
+                label=labels[topic]
+            )
+    
+    # Add vertical line at target timestamp
+    plt.axvline(x=target_seconds, color='green', linestyle='--', label='Target Time')
+    
+    # Add labels and legend
+    plt.xlabel('Time (seconds from bag start)')
+    plt.ylabel('Minimum Pixel Value')
+    plt.title('Minimum Image Values Over Time')
+    plt.legend()
+    plt.grid(True)
+    
+    # Save the plot
+    plot_path = output_path / 'min_image_values.png'
+    plt.savefig(plot_path)
+    plt.close()
+    
+    print(f"Saved minimum value plot to {plot_path}")
+
+
 def additional_processing(reader, timestamp, output_path):
     """
     Perform any additional processing at the specified timestamp.
@@ -383,8 +483,8 @@ def additional_processing(reader, timestamp, output_path):
         timestamp (float): Target timestamp
         output_path (Path): Output directory
     """
-    # TODO: Add any other processing you need
-    pass
+    # Plot minimum image values over time
+    plot_min_image_values(reader, timestamp, output_path, time_range=5.0)
 
 def main():
     """Main entry point for the script."""
