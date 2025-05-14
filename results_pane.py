@@ -12,6 +12,15 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime, timedelta
 
+# Global dictionary for topic mappings
+TOPIC_MAPPING = {
+    # Map both raw and processed topics to the same naming scheme
+    '/raw_psi_image': {'label': '$v_0$', 'filename': 'v0', 'color': 'red'},
+    '/psi_image': {'label': '$v_0$', 'filename': 'v0', 'color': 'red'},
+    '/raw_h_image': {'label': '$v_1$', 'filename': 'v1', 'color': 'blue'},
+    '/h_image': {'label': '$v_1$', 'filename': 'v1', 'color': 'blue'},
+}
+
 def process_timestamp(bag_path, timestamp, output_folder):
     """
     Process data at the specified timestamp from the rosbag.
@@ -53,7 +62,7 @@ def process_timestamp(bag_path, timestamp, output_folder):
         extract_images(reader, target_timestamp, output_path)
         
         # Process sceneflow message
-        #process_sceneflow(reader, target_timestamp, output_path)
+        process_sceneflow(reader, target_timestamp, output_path)
         #visualize_sceneflow(reader, target_timestamp, output_path)
         
         # Any other processing
@@ -132,8 +141,12 @@ def save_image(image_msg, topic_name, output_path):
         topic_name (str): Topic the image came from
         output_path (Path): Output directory
     """
-    # Extract topic name for the filename
-    topic_simple = topic_name.replace('/', '_').strip('_')
+    # Use the mapping dictionary to get the filename
+    if topic_name in TOPIC_MAPPING:
+        topic_simple = TOPIC_MAPPING[topic_name]['filename']
+    else:
+        # Fall back to default naming for other topics
+        topic_simple = topic_name.replace('/', '_').strip('_')
 
     # Map from ROS image encodings to OpenCV color conversion codes
     CV_CONVERSION_CODES = {
@@ -155,14 +168,6 @@ def save_image(image_msg, topic_name, output_path):
     
     # Convert image data to numpy array
     image_data = np.frombuffer(image_msg.data, dtype=np.uint8).reshape(image_msg.height, image_msg.width, -1)
-
-    #print(image_data.shape)
-    
-    # Decode image using OpenCV
-    #image = cv2.imdecode(image_data, CV_CONVERSION_CODES[image_msg.encoding])
-
-    #print(CV_CONVERSION_CODES[image_msg.encoding])
-    #print(image.shape)
 
     print(image_msg.encoding)
 
@@ -441,19 +446,16 @@ def plot_min_image_values(reader, timestamp, output_path, time_range=5.0):
     # Target timestamp in seconds from start
     target_seconds = (timestamp - reader.start_time) / 1e9
     
-    colors = {'/raw_h_image': 'blue', '/raw_psi_image': 'red'}
-    labels = {'/raw_h_image': 'H Image', '/raw_psi_image': 'PSI Image'}
-    
     # Plot data for each topic
     for topic in topics:
-        if results[topic]['timestamps']:
+        if topic in TOPIC_MAPPING and results[topic]['timestamps']:
             plt.plot(
                 results[topic]['timestamps'], 
                 results[topic]['min_values'],
                 marker='o',
                 linestyle='-',
-                color=colors[topic],
-                label=labels[topic]
+                color=TOPIC_MAPPING[topic]['color'],
+                label=TOPIC_MAPPING[topic]['label']
             )
     
     # Add vertical line at target timestamp
@@ -462,12 +464,12 @@ def plot_min_image_values(reader, timestamp, output_path, time_range=5.0):
     # Add labels and legend
     plt.xlabel('Time (seconds from bag start)')
     plt.ylabel('Minimum Pixel Value')
-    plt.title('Minimum Image Values Over Time')
+    plt.title('Minimum Image Values Over Time ($v_0$ and $v_1$)')
     plt.legend()
     plt.grid(True)
     
-    # Save the plot
-    plot_path = output_path / 'min_image_values.png'
+    # Save the plot using new naming convention
+    plot_path = output_path / 'min_values_v0_v1.png'
     plt.savefig(plot_path)
     plt.close()
     
