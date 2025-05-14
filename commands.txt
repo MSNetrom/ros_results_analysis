@@ -1,1 +1,1 @@
-python3 results_pane.py ../sceneflow_bags/day_3/day3_part2/test_2/jacamar_2025-05-12-14-15-04_0.bag 20 results/slide_results
+python3 results_pane.py ../sceneflow_bags/day_3/day3_part2/test_2/jacamar_2025-05-12-14-15-04_0.bag 60 results/slide_results

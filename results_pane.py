@@ -276,7 +276,7 @@ def visualize_sceneflow(pts, vecs, output_path):
     for p, v in zip(pts_sampled, vecs_sampled):
         start = p
         # Optionally adjust scale for visualization of the vector length
-        scale = 0.1
+        scale = 0.2
         end = p + scale * v
 
         idx_start = len(arrow_points)
@@ -297,54 +297,79 @@ def visualize_sceneflow(pts, vecs, output_path):
     vis = o3d.visualization.Visualizer()
     vis.create_window(
         window_name="Scene Flow Vector Field",
-        width=800,
-        height=600,
+        width=640,
+        height=480,
         left=50,
         top=50
     )
     vis.add_geometry(pcd)
     vis.add_geometry(line_set)
 
-    # Get the ViewControl object and camera parameters
+    # Add a coordinate frame for reference
+    coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.5, origin=[0, 0, 0])
+    vis.add_geometry(coordinate_frame)
+    
+    # Improve rendering settings
+    opt = vis.get_render_option()
+    opt.point_size = 3.0
+    opt.line_width = 2.0
+    opt.background_color = [1.0, 1.0, 1.0]  # White background
+    opt.light_on = True
+    
+    # Get view control
     ctr = vis.get_view_control()
-    param = ctr.convert_to_pinhole_camera_parameters()
-
-    # --- Set custom camera parameters ---
-    # Define the desired camera position, target (look-at) and up vector
-    camera_position = np.array([0.0, 0.0, 0.0])  # Use floats!
-    lookat = np.array([0.0, 0.0, -1.0])
-    up_direction = np.array([0.0, 1.0, 0.0])
-
-    # Compute the new camera coordinate frame
-    # Forward vector (from camera towards target)
-    forward = (lookat - camera_position)
-    forward /= np.linalg.norm(forward)
-    # Right vector:
-    right = np.cross(forward, up_direction)
-    right /= np.linalg.norm(right)
-    # Recompute the orthogonal up vector
-    up = np.cross(right, forward)
-
-    # Build the rotation matrix from world to camera coordinates
-    R = np.stack((right, up, -forward), axis=0)  # 3x3 rotation
-    T = -R @ camera_position.reshape(3, 1)
-    extrinsic = np.eye(4)
-    extrinsic[:3, :3] = R
-    extrinsic[:3, 3:] = T
-
-    # Assign our modified extrinsic matrix to the camera parameters
-    param.extrinsic = extrinsic
-    ctr.convert_from_pinhole_camera_parameters(param)
-    # --- End of camera parameter adjustment ---
-
-    # Render once
+    
+    # Set the default camera parameters from the extrinsic matrix
+    params = ctr.convert_to_pinhole_camera_parameters()
+    params.extrinsic = np.array([
+        [0.9954698115455077, -0.04183263560415689, 0.08538082278803111, -0.10985717201383449],
+        [0.056841665625145185, 0.9817027486862883, -0.1817381035191727, 1.1129760018649744],
+        [-0.07621600455619892, 0.18576798384058585, 0.9796332869136763, 2.3289899295446252],
+        [0.0, 0.0, 0.0, 1.0]
+    ])
+    ctr.convert_from_pinhole_camera_parameters(params)
+    
+    # Update the renderer
     vis.poll_events()
     vis.update_renderer()
     
-    # Capture the screen image
+    print("\n------------------------------------------------------")
+    print("CAMERA CONFIGURATION:")
+    print("1. Default view has been applied")
+    print("2. You can adjust the view using your mouse if needed")
+    print("3. Close the window when ready to save the image")
+    print("------------------------------------------------------\n")
+    
+    # Run the window to allow manual camera adjustment
+    vis.run()
+    
+    # After the window is closed, get the final camera parameters
+    params = ctr.convert_to_pinhole_camera_parameters()
+    
+    # Extract useful view parameters for logging
+    extrinsic = params.extrinsic
+    R = extrinsic[:3, :3]
+    forward = -R[2, :]
+    up = R[1, :]
+    
+    print("\n------------------------------------------------------")
+    print("FINAL CAMERA CONFIGURATION:")
+    print(f"# Extrinsic matrix (camera pose):")
+    print(f"extrinsic_matrix = np.array({extrinsic.tolist()})")
+    print(f"\n# View parameters:")
+    print(f"forward = {forward.tolist()}")
+    print(f"up = {up.tolist()}")
+    print("------------------------------------------------------\n")
+    
+    # Save the image with the final view configuration
     image_path = str(output_path / 'sceneflow_visualization.png')
     vis.capture_screen_image(image_path, True)
-    print(f"Saved visualization image to {image_path}")
+    
+    # Also save in a lossless format
+    image_path_png = str(output_path / 'sceneflow_visualization_hq.png')
+    vis.capture_screen_image(image_path_png, do_render=True)
+    
+    print(f"Saved visualization images to {image_path} and {image_path_png}")
     
     # Close the window
     vis.destroy_window()
