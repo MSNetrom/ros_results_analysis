@@ -462,14 +462,14 @@ def plot_min_image_values(reader, timestamp, output_path, time_range=5.0):
     plt.axvline(x=target_seconds, color='green', linestyle='--', label='Target Time')
     
     # Add labels and legend
-    plt.xlabel('Time (seconds from bag start)')
-    plt.ylabel('Minimum Pixel Value')
-    plt.title('Minimum Image Values Over Time ($v_0$ and $v_1$)')
+    plt.xlabel('Time (seconds from flight start)')
+    plt.ylabel('Minimum Values')
+    plt.title('Minimum Values Over Time ($v_0$ and $v_1$)')
     plt.legend()
     plt.grid(True)
     
     # Save the plot using new naming convention
-    plot_path = output_path / 'min_values_v0_v1.png'
+    plot_path = output_path / 'min_values_v0_v1.pdf'
     plt.savefig(plot_path)
     plt.close()
     
