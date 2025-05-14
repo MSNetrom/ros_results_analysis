@@ -62,11 +62,17 @@ def process_timestamp(bag_path, timestamp, output_folder):
         # Extract images
         extract_images(reader, target_timestamp, output_path)
         
-        # Process sceneflow message
-        #process_sceneflow(reader, target_timestamp, output_path)
+        # Create the new control visualization
+        create_control_visualization(reader, target_timestamp, output_path,
+                                   time_range=3.0,         # Time range in seconds
+                                   distance_threshold=3.0)  # Max distance in meters
         
         # Visualize drone path and point cloud
-        visualize_path_and_pointcloud(reader, target_timestamp, output_path, time_range=0.5, voxel_size=0.01, zoom_factor=15)
+        #generate_timeline_visualization(reader, target_timestamp, output_path, 
+        #                             time_range=5.0,           # Time range in seconds
+        #                             point_cloud_interval=1.0,  # Sample interval
+        #                             fixed_view_size=None,      # Auto-scale view
+        #                             distance_threshold=3.0)    # Max distance in meters
         
         # Any other processing
         additional_processing(reader, target_timestamp, output_path)
@@ -491,154 +497,255 @@ def additional_processing(reader, timestamp, output_path):
     # Plot minimum image values over time
     plot_min_image_values(reader, timestamp, output_path, time_range=5.0)
 
-def visualize_path_and_pointcloud(reader, timestamp, output_path, time_range=10.0, voxel_size=1.0, zoom_factor=1.5):
+def create_timeline_visualization(point_clouds_with_timestamps, output_path, time_range, fixed_view_size=None):
     """
-    Visualize the drone path and aggregated point cloud data in 3D.
+    Create a timeline visualization of point clouds where x-axis represents time.
+    
+    Args:
+        point_clouds_with_timestamps: List of (timestamp, point_cloud) pairs
+        output_path: Path to save visualization
+        time_range: Total time range in seconds
+        fixed_view_size: Optional fixed size for view dimensions
+    """
+    try:
+        # Try newer style format first
+        plt.style.use('seaborn-v0_8-whitegrid')
+    except:
+        try:
+            # Fall back to older style name
+            plt.style.use('seaborn-whitegrid')
+        except:
+            # If all else fails, use default style
+            pass
+    
+    # Create figure
+    fig = plt.figure(figsize=(15, 10))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Sort point clouds by timestamp
+    point_clouds_with_timestamps.sort(key=lambda x: x[0])
+    
+    # Calculate time range
+    start_time = point_clouds_with_timestamps[0][0]
+    end_time = point_clouds_with_timestamps[-1][0]
+    total_time = end_time - start_time
+    
+    # Use a colormap to differentiate point clouds by time
+    cmap = plt.cm.viridis
+    
+    # Container for combined points
+    all_points = []
+    all_colors = []
+    time_labels = []
+    
+    # Process each point cloud
+    for i, (timestamp, points) in enumerate(point_clouds_with_timestamps):
+        if len(points) == 0:
+            continue
+            
+        # Normalize time for this point cloud (0 to 1)
+        norm_time = (timestamp - start_time) / total_time
+        
+        # Sample points if too many
+        max_points_per_cloud = 2000
+        if len(points) > max_points_per_cloud:
+            idx = np.random.choice(len(points), max_points_per_cloud, replace=False)
+            sampled_points = points[idx]
+        else:
+            sampled_points = points
+        
+        # Modify x-coordinates to represent time
+        time_factor = 10.0  # Scale factor to spread clouds visibly
+        time_position = norm_time * time_factor
+        
+        # Create a copy to avoid modifying the original points
+        modified_points = sampled_points.copy()
+        
+        # Shift x-coordinates based on time
+        modified_points[:, 0] += time_position
+        
+        # Store the modified points
+        all_points.append(modified_points)
+        
+        # Create color for this point cloud
+        color = cmap(norm_time)
+        colors = np.array([color for _ in range(len(modified_points))])
+        all_colors.append(colors)
+        
+        # Add time label at regular intervals
+        if i % max(1, len(point_clouds_with_timestamps) // 5) == 0:
+            time_labels.append((time_position, f"{timestamp:.1f}s"))
+    
+    # Combine all points and colors
+    combined_points = np.vstack(all_points) if all_points else np.array([])
+    combined_colors = np.vstack(all_colors) if all_colors else np.array([])
+    
+    if len(combined_points) == 0:
+        print("No valid points to visualize")
+        return
+    
+    # Plot the points
+    scatter = ax.scatter(
+        combined_points[:, 0],  # x is now time-based
+        combined_points[:, 1],  # y stays as spatial dimension
+        combined_points[:, 2],  # z stays as spatial dimension
+        c=combined_colors,      # color by time
+        s=15,                   # point size
+        alpha=0.8,              # transparency
+        marker='o',             # marker style
+        edgecolors='none'       # no edge color for performance
+    )
+    
+    # Add time labels on x-axis
+    for pos, label in time_labels:
+        ax.text(pos, min(combined_points[:, 1]), min(combined_points[:, 2]), 
+               label, color='black', fontsize=10, 
+               bbox=dict(facecolor='white', alpha=0.7, boxstyle='round'))
+    
+    # Add reference lines showing time positions
+    min_y, max_y = min(combined_points[:, 1]), max(combined_points[:, 1])
+    min_z, max_z = min(combined_points[:, 2]), max(combined_points[:, 2])
+    y_mid = (min_y + max_y) / 2
+    z_mid = (min_z + max_z) / 2
+    
+    for pos, _ in time_labels:
+        ax.plot([pos, pos], [min_y, max_y], [z_mid, z_mid], 
+               '--', color='gray', alpha=0.5, linewidth=1)
+        ax.plot([pos, pos], [y_mid, y_mid], [min_z, max_z], 
+               '--', color='gray', alpha=0.5, linewidth=1)
+    
+    # Add title and labels
+    ax.set_title('Point Cloud Timeline Visualization', fontsize=14)
+    ax.set_xlabel('Time Progression →', fontsize=12)
+    ax.set_ylabel('Y (m)', fontsize=12)
+    ax.set_zlabel('Z (m)', fontsize=12)
+    
+    # Set appropriate view limits
+    if fixed_view_size:
+        # Use fixed dimensions if specified
+        y_range = fixed_view_size
+        z_range = fixed_view_size
+    else:
+        # Calculate based on data
+        y_range = max_y - min_y
+        z_range = max_z - min_z
+    
+    y_mid = (max_y + min_y) / 2
+    z_mid = (max_z + min_z) / 2
+    
+    # Set y and z limits to be equal for better perspective
+    max_range = max(y_range, z_range) / 2 * 1.5  # Add some margin
+    
+    # For x, use the full time range
+    ax.set_xlim(0, time_factor + 1)  # Add margin
+    ax.set_ylim(y_mid - max_range, y_mid + max_range)
+    ax.set_zlim(z_mid - max_range, z_mid + max_range)
+    
+    # Set initial viewing angle
+    ax.view_init(elev=30, azim=-80)  # View along the time axis
+    
+    # Add colorbar for time
+    sm = plt.cm.ScalarMappable(cmap=cmap)
+    sm.set_array(np.linspace(0, 1, 100))
+    cbar = fig.colorbar(sm, ax=ax, pad=0.1, shrink=0.5, aspect=15)
+    cbar.set_label('Time Progression', fontsize=10)
+    
+    # Add stats text
+    stats_text = (
+        f"Timeline Visualization\n"
+        f"Time Range: {start_time:.1f}s to {end_time:.1f}s\n"
+        f"Duration: {total_time:.1f} seconds\n"
+        f"Point Clouds: {len(point_clouds_with_timestamps)}\n"
+        f"Total Points: {len(combined_points)}"
+    )
+    
+    fig.text(0.02, 0.02, stats_text, fontsize=10,
+            bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.5'))
+    
+    # Save figure
+    plt.tight_layout()
+    plt.savefig(str(output_path / 'point_cloud_timeline.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(str(output_path / 'point_cloud_timeline.pdf'), bbox_inches='tight')
+    
+    # Show the visualization
+    plt.show()
+    plt.close()
+
+def generate_timeline_visualization(reader, timestamp, output_path, time_range=10.0, 
+                                  point_cloud_interval=1.0, fixed_view_size=None,
+                                  distance_threshold=5.0):
+    """
+    Generate a timeline visualization of point clouds over time.
     
     Args:
         reader (AnyReader): Rosbag reader
         timestamp (float): Target absolute timestamp in nanoseconds
         output_path (Path): Output directory
         time_range (float): Time range in seconds to visualize
-        voxel_size (float): Size of voxels for point cloud downsampling
-        zoom_factor (float): Factor to zoom out in the visualization
+        point_cloud_interval (float): Time interval in seconds between point cloud samples
+        fixed_view_size (float): Optional fixed size for view dimensions
+        distance_threshold (float): Maximum distance (in meters) to include points
     """
-    # Print absolute timestamp and relative time for verification
-    target_seconds = (timestamp - reader.start_time) / 1e9
-    print(f"\nVisualizing point cloud at absolute timestamp: {timestamp} ns")
-    print(f"This is {target_seconds:.2f} seconds from bag start")
-    print(f"Time range: ±{time_range/2:.1f} seconds ({time_range:.1f}s total)")
+    # Define time range bounds
+    start_time = timestamp - int(time_range * 1e9 / 2)
+    end_time = timestamp + int(time_range * 1e9 / 2)
     
-    # Define topics
+    print(f"\nGenerating point cloud timeline from {(start_time-reader.start_time)/1e9:.2f}s to {(end_time-reader.start_time)/1e9:.2f}s")
+    print(f"Using point cloud interval of {point_cloud_interval}s")
+    print(f"Distance threshold: {distance_threshold}m")
+    
+    # Define topic
     pointcloud_topic = '/depth_point_cloud'
-    odometry_topic = '/rig_node/odometry'  # Primary odometry topic
-    fallback_odom_topics = ['/rig_node/graph/odometry', '/rig_node/graph/pose_stamped']
     
-    # Find connections
+    # Find connection
     pointcloud_conn = [x for x in reader.connections if x.topic == pointcloud_topic]
-    odom_conn = [x for x in reader.connections if x.topic == odometry_topic]
-    
-    # If primary odometry topic not found, try fallbacks
-    if not odom_conn:
-        for topic in fallback_odom_topics:
-            odom_conn = [x for x in reader.connections if x.topic == topic]
-            if odom_conn:
-                odometry_topic = topic
-                print(f"Using {topic} for odometry data")
-                break
     
     if not pointcloud_conn:
         print(f"No point cloud topic found: {pointcloud_topic}")
         return
     
-    if not odom_conn:
-        print("No odometry topics found")
-        return
+    # Select point clouds at regular time intervals
+    point_clouds_with_times = []
+    print(f"\nSelecting point clouds at {point_cloud_interval}s intervals...")
     
-    # Define time range bounds
-    start_time = timestamp - int(time_range * 1e9 / 2)  # Start before target timestamp
-    end_time = timestamp + int(time_range * 1e9 / 2)    # End after target timestamp
+    # Calculate the interval in nanoseconds
+    interval_ns = int(point_cloud_interval * 1e9)
     
-    print(f"Time range: {(start_time - reader.start_time)/1e9:.2f}s to {(end_time - reader.start_time)/1e9:.2f}s from bag start")
+    # Generate target timestamps at regular intervals
+    target_times = []
+    current_time = start_time
+    while current_time <= end_time:
+        target_times.append(current_time)
+        current_time += interval_ns
     
-    # Process odometry messages to build a map of poses by timestamp
-    pose_map = {}  # Map of timestamp -> [seconds_from_start, position, orientation]
-    print(f"\nProcessing odometry data from {odometry_topic}...")
-    
-    odom_count = 0
-    for conn, msg_timestamp, rawdata in reader.messages(connections=odom_conn):
-        # Skip messages outside our time range
-        if msg_timestamp < start_time or msg_timestamp > end_time:
+    # Process each target timestamp
+    for target_time in target_times:
+        # Find the point cloud closest to this time
+        closest_pc_msg = None
+        closest_pc_diff = float('inf')
+        
+        for conn, msg_timestamp, rawdata in reader.messages(connections=pointcloud_conn):
+            # Skip messages outside our broad time range
+            if msg_timestamp < start_time or msg_timestamp > end_time:
+                continue
+                
+            # Check if this is closer to our target time
+            time_diff = abs(msg_timestamp - target_time)
+            if time_diff < closest_pc_diff:
+                closest_pc_diff = time_diff
+                closest_pc_msg = (conn, msg_timestamp, rawdata)
+            
+            # If we've gone past our target time by a good margin, stop searching
+            if msg_timestamp > target_time + interval_ns:
+                break
+        
+        # Skip if no point cloud found or too far from target
+        if closest_pc_msg is None or closest_pc_diff > 0.5 * interval_ns:
+            print(f"  No suitable point cloud found near {(target_time - reader.start_time)/1e9:.2f}s")
             continue
             
-        odom_count += 1
-        msg = reader.deserialize(rawdata, conn.msgtype)
+        conn, msg_timestamp, rawdata = closest_pc_msg
         seconds_from_start = (msg_timestamp - reader.start_time) / 1e9
-        
-        # Extract position and orientation
-        if odometry_topic.endswith('pose_stamped'):
-            # Handle PoseStamped message type
-            position = [
-                msg.pose.position.x,
-                msg.pose.position.y,
-                msg.pose.position.z
-            ]
-            orientation = [
-                msg.pose.orientation.x,
-                msg.pose.orientation.y,
-                msg.pose.orientation.z,
-                msg.pose.orientation.w
-            ]
-        else:
-            # Handle Odometry message type
-            position = [
-                msg.pose.pose.position.x,
-                msg.pose.pose.position.y,
-                msg.pose.pose.position.z
-            ]
-            orientation = [
-                msg.pose.pose.orientation.x,
-                msg.pose.pose.orientation.y,
-                msg.pose.pose.orientation.z,
-                msg.pose.pose.orientation.w
-            ]
-        
-        # Store pose data indexed by timestamp
-        pose_map[msg_timestamp] = [seconds_from_start, position, orientation]
-        
-        # Log some poses at regular intervals for debugging
-        if odom_count % 20 == 0:
-            print(f"  Odometry at {seconds_from_start:.2f}s: pos={position}, quat={orientation}")
-    
-    print(f"Found {len(pose_map)} odometry messages in time range")
-    
-    if not pose_map:
-        print("No pose data found in the specified time range")
-        return
-    
-    # Build sorted list of poses for trajectory visualization
-    poses = sorted([pose_map[ts] for ts in pose_map], key=lambda x: x[0])
-    
-    # Process pointcloud messages
-    all_points = []  # Will store transformed point clouds
-    print(f"\nProcessing point cloud data from {pointcloud_topic}...")
-    
-    # Sample interval for processing point clouds (to reduce data)
-    sample_interval = 5  # Process every 5th message
-    count = 0
-    pc_count = 0
-    
-    for conn, msg_timestamp, rawdata in reader.messages(connections=pointcloud_conn):
-        # Skip messages outside our time range
-        if msg_timestamp < start_time or msg_timestamp > end_time:
-            continue
-            
-        count += 1
-        # Only process every Nth message to reduce data
-        if count % sample_interval != 0:
-            continue
-        
-        pc_count += 1
-        seconds_from_start = (msg_timestamp - reader.start_time) / 1e9
-        
-        # Find closest pose timestamp
-        if not pose_map:
-            print(f"  No poses available for point cloud at {seconds_from_start:.2f}s")
-            continue
-            
-        closest_pose_ts = min(pose_map.keys(), key=lambda ts: abs(ts - msg_timestamp))
-        closest_pose_time_diff = abs(closest_pose_ts - msg_timestamp) / 1e9  # in seconds
-        
-        # Skip if pose is too far from point cloud timestamp
-        if closest_pose_time_diff > 0.1:  # 100ms threshold
-            print(f"  Skipping point cloud at {seconds_from_start:.2f}s - closest pose is {closest_pose_time_diff:.3f}s away")
-            continue
-        
-        # Get the pose
-        _, position, orientation = pose_map[closest_pose_ts]
-        pose_seconds = (closest_pose_ts - reader.start_time) / 1e9
-        
-        print(f"  Processing point cloud at {seconds_from_start:.2f}s (using pose from {pose_seconds:.2f}s)")
         
         try:
             # Deserialize point cloud
@@ -648,27 +755,39 @@ def visualize_path_and_pointcloud(reader, timestamp, output_path, time_range=10.
             pc_data = extract_pointcloud2_data(msg)
             
             if pc_data is not None and len(pc_data) > 0:
-                print(f"    Original point cloud has {len(pc_data)} points")
+                original_points = len(pc_data)
                 
-                # Transform points to global frame
-                transformed_points = transform_points_to_global(pc_data, position, orientation)
+                # Filter points based on distance from origin
+                # Calculate Euclidean distances for all points
+                distances = np.linalg.norm(pc_data, axis=1)
                 
-                # Downsample for visualization
-                original_len = len(transformed_points)
-                transformed_points = downsample_pointcloud(transformed_points, voxel_size=voxel_size)
-                print(f"    Downsampled from {original_len} to {len(transformed_points)} points (voxel_size={voxel_size})")
+                # Keep only points within the distance threshold
+                pc_data = pc_data[distances <= distance_threshold]
                 
-                # Store transformed points
-                all_points.append(transformed_points)
+                print(f"  Processing point cloud at {seconds_from_start:.2f}s:")
+                print(f"    Original: {original_points} points")
+                print(f"    After distance filter ({distance_threshold}m): {len(pc_data)} points")
+                
+                # Skip if too few points remain after filtering
+                if len(pc_data) < 10:
+                    print(f"    Skipping due to insufficient points after filtering")
+                    continue
+                
+                # Apply random sampling to reduce points if still too many
+                if len(pc_data) > 2000:
+                    indices = np.random.choice(len(pc_data), 2000, replace=False)
+                    pc_data = pc_data[indices]
+                    print(f"    After sampling: {len(pc_data)} points")
+                
+                # Store the point cloud with its time
+                point_clouds_with_times.append((seconds_from_start, pc_data))
         except Exception as e:
             print(f"    Error processing point cloud: {e}")
     
-    print(f"Processed {pc_count} point cloud messages out of {count} in time range")
-    
-    # Create 3D visualization
-    if poses and all_points:
-        print(f"\nCreating 3D visualization with {len(poses)} poses and {len(all_points)} point clouds...")
-        create_3d_visualization(poses, all_points, output_path, zoom_factor=zoom_factor)
+    # Create timeline visualization
+    if point_clouds_with_times:
+        print(f"\nCreating timeline visualization with {len(point_clouds_with_times)} point clouds...")
+        create_timeline_visualization(point_clouds_with_times, output_path, time_range, fixed_view_size)
     else:
         print("Not enough data for visualization")
 
@@ -723,7 +842,7 @@ def downsample_pointcloud(points, voxel_size=0.1):
     # Convert back to numpy array
     return np.asarray(downsampled_pcd.points)
 
-def create_3d_visualization(poses, pointclouds, output_path, zoom_factor=1.5):
+def create_3d_visualization(poses, pointclouds, output_path, zoom_factor=1.5, fixed_view_size=None):
     """
     Create an enhanced 3D visualization of drone path and point clouds using matplotlib.
     
@@ -732,6 +851,7 @@ def create_3d_visualization(poses, pointclouds, output_path, zoom_factor=1.5):
         pointclouds: List of point cloud arrays
         output_path: Path to save visualization
         zoom_factor: Factor to zoom out (>1.0 zooms out, <1.0 zooms in)
+        fixed_view_size: Optional fixed size for view cube in meters
     """
     # Set a modern style that's compatible with older matplotlib versions
     try:
@@ -969,20 +1089,396 @@ def transform_points_to_global(points, position, orientation):
     Returns:
         np.ndarray: Points in global frame
     """
-    # Convert quaternion (x, y, z, w) to rotation matrix using scipy
+    # Convert quaternion to scipy Rotation object
+    # scipy uses [x, y, z, w] format
     qx, qy, qz, qw = orientation
-    
-    # SciPy's Rotation class uses (w, x, y, z) format
     rot = R.from_quat([qx, qy, qz, qw])
     
-    # Get rotation matrix
-    rotation_matrix = rot.as_matrix()
+    # Apply rotation
+    rotated_points = rot.apply(points)
     
-    # Apply rotation and translation
+    # Apply translation
     position_array = np.array(position)
-    transformed_points = np.dot(points, rotation_matrix.T) + position_array
+    transformed_points = rotated_points + position_array
     
     return transformed_points
+
+def create_control_visualization(reader, timestamp, output_path, time_range=10.0, distance_threshold=5.0):
+    """
+    Create visualization with point cloud snapshots and control/reference data.
+    
+    Args:
+        reader (AnyReader): Rosbag reader
+        timestamp (float): Target absolute timestamp in nanoseconds
+        output_path (Path): Output directory
+        time_range (float): Time range in seconds to visualize
+        distance_threshold (float): Maximum distance (in meters) to include points
+    """
+    # Define time range bounds
+    start_time = timestamp - int(time_range * 1e9 / 2)
+    end_time = timestamp + int(time_range * 1e9 / 2)
+    
+    print(f"\nCreating control visualization from {(start_time-reader.start_time)/1e9:.2f}s to {(end_time-reader.start_time)/1e9:.2f}s")
+    
+    # Define topics - expand the list of potential control/reference topics
+    pointcloud_topic = '/depth_point_cloud'
+    
+    # Add more potential topics for reference and control data
+    control_topics = [
+        '/mavros/setpoint_raw/local_viz',    # Reference visualization
+    ]
+    
+    reference_topics = [
+        '/input_viz',                        # Primary control input visualization
+    ]
+    
+    # Find connections
+    pointcloud_conn = [x for x in reader.connections if x.topic == pointcloud_topic]
+    
+    # Try to find reference topic connections
+    reference_conn = []
+    reference_topic_found = None
+    for topic in reference_topics:
+        conn = [x for x in reader.connections if x.topic == topic]
+        if conn:
+            reference_conn = conn
+            reference_topic_found = topic
+            print(f"Found reference topic: {topic}")
+            break
+    
+    # Try to find control topic connections
+    control_conn = []
+    control_topic_found = None
+    for topic in control_topics:
+        conn = [x for x in reader.connections if x.topic == topic]
+        if conn:
+            control_conn = conn
+            control_topic_found = topic
+            print(f"Found control topic: {topic}")
+            break
+    
+    # Log all available topics if we didn't find what we need
+    if not reference_conn and not control_conn:
+        print("Could not find reference or control topics. Available topics:")
+        for topic in sorted([conn.topic for conn in reader.connections]):
+            print(f"  {topic}")
+    
+    # Check that we found point cloud topic
+    if not pointcloud_conn:
+        print(f"No point cloud topic found: {pointcloud_topic}")
+        return
+    
+    # Get 4 evenly spaced time points
+    num_snapshots = 4
+    time_points = []
+    time_interval = time_range / (num_snapshots - 1)
+    
+    for i in range(num_snapshots):
+        time_point = start_time + int(i * time_interval * 1e9)
+        time_points.append(time_point)
+    
+    # Collect data for each time point
+    snapshot_data = []
+    
+    for time_point in time_points:
+        relative_time = (time_point - reader.start_time) / 1e9
+        print(f"\nProcessing snapshot at {relative_time:.2f}s")
+        
+        # Find closest point cloud
+        closest_pc = get_closest_message(reader, pointcloud_conn, time_point, max_diff=0.5 * 1e9)
+        
+        if not closest_pc:
+            print(f"  No point cloud found near {relative_time:.2f}s")
+            continue
+        
+        pc_time, pc_msg = closest_pc
+        pc_data = extract_pointcloud2_data(pc_msg)
+        
+        if pc_data is None or len(pc_data) == 0:
+            print(f"  Empty point cloud at {relative_time:.2f}s")
+            continue
+        
+        # Filter by distance
+        distances = np.linalg.norm(pc_data, axis=1)
+        pc_data = pc_data[distances <= distance_threshold]
+        
+        if len(pc_data) < 10:
+            print(f"  Too few points after filtering at {relative_time:.2f}s")
+            continue
+        
+        # Downsample if needed
+        if len(pc_data) > 2000:
+            indices = np.random.choice(len(pc_data), 2000, replace=False)
+            pc_data = pc_data[indices]
+        
+        # Get reference input
+        reference_data = None
+        if reference_conn:
+            try:
+                ref_msg = get_closest_message(reader, reference_conn, time_point)
+                if ref_msg:
+                    ref_time, msg = ref_msg
+                    ref_time_rel = (ref_time - reader.start_time) / 1e9
+                    print(f"  Found reference message at {ref_time_rel:.2f}s")
+                    
+                    # Try multiple message formats
+                    if hasattr(msg, 'twist') and hasattr(msg.twist, 'linear'):
+                        reference_data = {
+                            'linear': [msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z],
+                            'angular': [msg.twist.angular.x, msg.twist.angular.y, msg.twist.angular.z]
+                        }
+                        print(f"  Reference data (twist format): {reference_data}")
+                    elif hasattr(msg, 'velocity'):
+                        reference_data = {
+                            'linear': [msg.velocity.x, msg.velocity.y, msg.velocity.z],
+                            'angular': [msg.yaw_rate] if hasattr(msg, 'yaw_rate') else [0.0]
+                        }
+                        print(f"  Reference data (velocity format): {reference_data}")
+                    elif hasattr(msg, 'linear') and hasattr(msg, 'angular'):
+                        reference_data = {
+                            'linear': [msg.linear.x, msg.linear.y, msg.linear.z],
+                            'angular': [msg.angular.x, msg.angular.y, msg.angular.z]
+                        }
+                        print(f"  Reference data (direct format): {reference_data}")
+                    else:
+                        print(f"  Unknown reference message format: {type(msg).__name__}")
+                        print(f"  Message attributes: {dir(msg)}")
+            except Exception as e:
+                print(f"  Error processing reference data: {e}")
+        
+        # Get control input
+        control_data = None
+        if control_conn:
+            try:
+                ctrl_msg = get_closest_message(reader, control_conn, time_point)
+                if ctrl_msg:
+                    ctrl_time, msg = ctrl_msg
+                    ctrl_time_rel = (ctrl_time - reader.start_time) / 1e9
+                    print(f"  Found control message at {ctrl_time_rel:.2f}s")
+                    
+                    # Try multiple message formats
+                    if hasattr(msg, 'twist') and hasattr(msg.twist, 'linear'):
+                        control_data = {
+                            'linear': [msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z],
+                            'angular': [msg.twist.angular.x, msg.twist.angular.y, msg.twist.angular.z]
+                        }
+                        print(f"  Control data (twist format): {control_data}")
+                    elif hasattr(msg, 'control'):
+                        # For actuator control messages
+                        control_data = {
+                            'control': msg.control[:],
+                            'mode': msg.group_mix if hasattr(msg, 'group_mix') else 0
+                        }
+                        print(f"  Control data (actuator format): {control_data}")
+                    elif hasattr(msg, 'linear') and hasattr(msg, 'angular'):
+                        control_data = {
+                            'linear': [msg.linear.x, msg.linear.y, msg.linear.z],
+                            'angular': [msg.angular.x, msg.angular.y, msg.angular.z]
+                        }
+                        print(f"  Control data (direct format): {control_data}")
+                    else:
+                        print(f"  Unknown control message format: {type(msg).__name__}")
+                        print(f"  Message attributes: {dir(msg)}")
+            except Exception as e:
+                print(f"  Error processing control data: {e}")
+        
+        # Store all data for this time point
+        snapshot_data.append({
+            'time': relative_time,
+            'point_cloud': pc_data,
+            'reference': reference_data,
+            'control': control_data
+        })
+    
+    # Create visualization if we have enough data
+    if len(snapshot_data) > 0:
+        print(f"\nCreating visualization with {len(snapshot_data)} snapshots")
+        create_snapshot_visualization(snapshot_data, output_path)
+    else:
+        print("Not enough data for visualization")
+
+def get_closest_message(reader, connections, target_time, max_diff=float('inf')):
+    """
+    Get the message closest to the target time.
+    
+    Args:
+        reader (AnyReader): Rosbag reader
+        connections: Message connections to search
+        target_time: Target timestamp
+        max_diff: Maximum allowed time difference (in ns)
+        
+    Returns:
+        tuple: (timestamp, deserialized message) or None if not found
+    """
+    closest_diff = float('inf')
+    closest_msg = None
+    
+    for conn, msg_time, rawdata in reader.messages(connections=connections):
+        time_diff = abs(msg_time - target_time)
+        
+        if time_diff < closest_diff:
+            closest_diff = time_diff
+            closest_msg = (msg_time, reader.deserialize(rawdata, conn.msgtype))
+    
+    if closest_msg and closest_diff <= max_diff:
+        return closest_msg
+    return None
+
+def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=5.0):
+    """
+    Create a multi-panel visualization with point clouds and control data.
+    
+    Args:
+        snapshot_data: List of dictionaries with time, point_cloud, reference, and control
+        output_path: Path to save the visualization
+        zoom_factor: Factor to zoom in (higher values = more zoomed in)
+    """
+    # Setup the figure with a 2x2 grid
+    fig = plt.figure(figsize=(16, 12))
+    
+    # Use a clean, minimalist style
+    plt.style.use('default')
+    
+    # Determine shared axis limits to keep the view consistent
+    all_points = np.vstack([data['point_cloud'] for data in snapshot_data])
+    
+    # Compute maximum absolute distance from origin in any dimension
+    max_abs_distance = np.max(np.abs(all_points)) * 1.2  # Add 20% margin
+    
+    # Apply zoom factor (divide by zoom factor to reduce the view range)
+    max_abs_distance = max_abs_distance / zoom_factor
+    
+    # Draw optional data
+    has_reference = any(data['reference'] for data in snapshot_data)
+    has_control = any(data['control'] for data in snapshot_data)
+    
+    # Create a subplot for each snapshot
+    for i, data in enumerate(snapshot_data):
+        ax = fig.add_subplot(2, 2, i+1, projection='3d')
+        
+        # Set background grid 
+        ax.xaxis._axinfo["grid"].update({"color": (0.9, 0.9, 0.9, 0.8)})
+        ax.yaxis._axinfo["grid"].update({"color": (0.9, 0.9, 0.9, 0.8)})
+        ax.zaxis._axinfo["grid"].update({"color": (0.9, 0.9, 0.9, 0.8)})
+        
+        # Plot the point cloud
+        ax.scatter(
+            data['point_cloud'][:, 0],
+            data['point_cloud'][:, 1],
+            data['point_cloud'][:, 2],
+            c='lightblue',
+            s=5,
+            alpha=0.6,
+            marker='o',
+            edgecolors='none'
+        )
+        
+        # Plot origin (drone position)
+        ax.scatter([0], [0], [0], c='red', s=100, marker='o')
+        
+        # Set axis limits centered around origin (0,0,0)
+        ax.set_xlim(-0.2, max_abs_distance)
+        ax.set_ylim(-max_abs_distance, max_abs_distance)
+        ax.set_zlim(-max_abs_distance, max_abs_distance)
+        
+        # Invert X and Y axes so they go from positive to negative
+        #ax.invert_xaxis()
+        #ax.invert_yaxis()
+        
+        # Equal aspect ratio for all axes
+        ax.set_box_aspect([1, 1, 1])
+        
+        # Set axis labels
+        ax.set_xlabel('X (m)')
+        ax.set_ylabel('Y (m)')
+        ax.set_zlabel('Z (m)')
+        
+        # Set title with time
+        ax.set_title(f"Time: {data['time']:.2f}s", fontsize=12)
+        
+        # Draw reference vector if available
+        if data['reference'] and 'linear' in data['reference']:
+            ref = data['reference']
+            # Draw vector from origin
+            if len(ref['linear']) >= 3:
+                # Use actual vector length instead of normalizing
+                ref_vector = np.array(ref['linear'])
+                if np.linalg.norm(ref_vector) > 0:
+                    ax.quiver(0, 0, 0, 
+                             ref_vector[0], ref_vector[1], ref_vector[2],
+                             color='limegreen', linewidth=2, label='Reference', 
+                             arrow_length_ratio=0.15)
+        
+        # Draw control vector if available
+        if data['control'] and 'linear' in data['control']:
+            ctrl = data['control']
+            # Draw vector from origin
+            if len(ctrl['linear']) >= 3:
+                # Use actual vector length instead of normalizing
+                ctrl_vector = np.array(ctrl['linear'])
+                if np.linalg.norm(ctrl_vector) > 0:
+                    ax.quiver(0, 0, 0, 
+                             ctrl_vector[0], ctrl_vector[1], ctrl_vector[2],
+                             color='#1f77b4', linewidth=2, label='Control', 
+                             arrow_length_ratio=0.15)
+        
+        # Add legend if we're drawing vectors
+        if (data['reference'] and 'linear' in data['reference']) or (data['control'] and 'linear' in data['control']):
+            ax.legend(loc='upper right')
+        
+        # Add control info as text
+        text_info = []
+        if data['reference']:
+            ref = data['reference']
+            # Format reference data based on what's available
+            if 'linear' in ref and len(ref['linear']) >= 3:
+                text_info.append(f"Reference vel: [{ref['linear'][0]:.2f}, {ref['linear'][1]:.2f}, {ref['linear'][2]:.2f}]")
+            if 'angular' in ref:
+                if len(ref['angular']) == 1:
+                    text_info.append(f"Reference yaw rate: {ref['angular'][0]:.2f}")
+                elif len(ref['angular']) >= 3:
+                    text_info.append(f"Reference ang: [{ref['angular'][0]:.2f}, {ref['angular'][1]:.2f}, {ref['angular'][2]:.2f}]")
+        
+        if data['control']:
+            ctrl = data['control']
+            if 'linear' in ctrl and len(ctrl['linear']) >= 3:
+                text_info.append(f"Control vel: [{ctrl['linear'][0]:.2f}, {ctrl['linear'][1]:.2f}, {ctrl['linear'][2]:.2f}]")
+            if 'angular' in ctrl and len(ctrl['angular']) >= 3:
+                text_info.append(f"Control ang: [{ctrl['angular'][0]:.2f}, {ctrl['angular'][1]:.2f}, {ctrl['angular'][2]:.2f}]")
+            if 'control' in ctrl:
+                text_info.append(f"Actuator: {', '.join([f'{v:.2f}' for v in ctrl['control']])}")
+        
+        # Add the text info at the top left
+        info_text = '\n'.join(text_info)
+        ax.text2D(0.05, 0.95, info_text, transform=ax.transAxes, fontsize=9,
+                 bbox=dict(facecolor='white', alpha=0.7, boxstyle='round'))
+        
+        # Set the view to match the image
+        ax.view_init(elev=50, azim=170)
+    
+    # Add a main title
+    title = "Point Cloud Snapshots"
+    if has_reference and has_control:
+        title += " with Reference and Control Data"
+    elif has_reference:
+        title += " with Reference Data"
+    elif has_control:
+        title += " with Control Data"
+    plt.suptitle(title, fontsize=16)
+    
+    # Adjust layout
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.92)
+
+    plt.show()
+    
+    # Save figure
+    output_file = output_path / 'control_visualization.png'
+    plt.savefig(output_file, dpi=300)
+    print(f"Saved control visualization to {output_file}")
+    
+    # Close the figure to free memory
+    plt.close(fig)
 
 def main():
     """Main entry point for the script."""
