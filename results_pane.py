@@ -1172,6 +1172,211 @@ def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=1.0):
     
     print(f"Saved {len(snapshot_data)} individual snapshot images to {output_path}")
 
+def create_3d_time_vector_visualization(reader, reference_conn, control_conn, start_time, end_time, output_path, 
+                                       sample_interval=0.2, vector_scale=0.05):
+    """
+    Create a 3D visualization with time as a line and reference/control vectors 
+    represented at intervals along the timeline.
+    
+    Args:
+        reader (AnyReader): Rosbag reader
+        reference_conn: Connection for reference messages
+        control_conn: Connection for control messages
+        start_time: Start timestamp in nanoseconds
+        end_time: End timestamp in nanoseconds
+        output_path: Path to save output plots
+        sample_interval: Time interval between vector samples (seconds)
+        vector_scale: Scaling factor for vector visualization (default: 0.05 - much shorter vectors)
+    """
+    print(f"Creating 3D time-vector visualization...")
+    
+    # Collect reference data
+    reference_samples = []
+    if reference_conn:
+        for conn, msg_timestamp, rawdata in reader.messages(connections=reference_conn):
+            # Skip messages outside time range
+            if msg_timestamp < start_time or msg_timestamp > end_time:
+                continue
+            
+            # Convert timestamp to seconds from bag start
+            rel_time = (msg_timestamp - reader.start_time) / 1e9
+            
+            try:
+                # Deserialize message
+                msg = reader.deserialize(rawdata, conn.msgtype)
+                
+                # Extract vector data based on message format
+                if hasattr(msg, 'twist') and hasattr(msg.twist, 'linear'):
+                    reference_samples.append({
+                        'time': rel_time,
+                        'linear': [msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z],
+                        'angular': [msg.twist.angular.x, msg.twist.angular.y, msg.twist.angular.z]
+                    })
+                elif hasattr(msg, 'velocity'):
+                    reference_samples.append({
+                        'time': rel_time,
+                        'linear': [msg.velocity.x, msg.velocity.y, msg.velocity.z],
+                        'angular': [msg.yaw_rate if hasattr(msg, 'yaw_rate') else 0.0, 0, 0]
+                    })
+                elif hasattr(msg, 'linear') and hasattr(msg, 'angular'):
+                    reference_samples.append({
+                        'time': rel_time,
+                        'linear': [msg.linear.x, msg.linear.y, msg.linear.z],
+                        'angular': [msg.angular.x, msg.angular.y, msg.angular.z]
+                    })
+            except Exception as e:
+                print(f"Error processing reference message: {e}")
+    
+    # Collect control data
+    control_samples = []
+    if control_conn:
+        for conn, msg_timestamp, rawdata in reader.messages(connections=control_conn):
+            # Skip messages outside time range
+            if msg_timestamp < start_time or msg_timestamp > end_time:
+                continue
+            
+            # Convert timestamp to seconds from bag start
+            rel_time = (msg_timestamp - reader.start_time) / 1e9
+            
+            try:
+                # Deserialize message
+                msg = reader.deserialize(rawdata, conn.msgtype)
+                
+                # Extract vector data based on message format
+                if hasattr(msg, 'twist') and hasattr(msg.twist, 'linear'):
+                    control_samples.append({
+                        'time': rel_time,
+                        'linear': [msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z],
+                        'angular': [msg.twist.angular.x, msg.twist.angular.y, msg.twist.angular.z]
+                    })
+                elif hasattr(msg, 'linear') and hasattr(msg, 'angular'):
+                    control_samples.append({
+                        'time': rel_time,
+                        'linear': [msg.linear.x, msg.linear.y, msg.linear.z],
+                        'angular': [msg.angular.x, msg.angular.y, msg.angular.z]
+                    })
+            except Exception as e:
+                print(f"Error processing control message: {e}")
+    
+    # Check if we have enough data to visualize
+    if not reference_samples and not control_samples:
+        print("No reference or control data available for 3D visualization")
+        return
+    
+    # Create separate visualizations for linear and angular components
+    for vector_type in ['linear', 'angular']:
+        # Create a new figure
+        fig = plt.figure(figsize=(14, 6))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # Time range for visualization
+        rel_start = (start_time - reader.start_time) / 1e9
+        rel_end = (end_time - reader.start_time) / 1e9
+        
+        # Draw time axis (a simple line from start to end)
+        ax.plot([rel_start, rel_end], [0, 0], [0, 0], 'k-', linewidth=2)
+        
+        # Add time ticks
+        time_ticks = np.linspace(rel_start, rel_end, 5)
+        for t in time_ticks:
+            ax.text(t, -0.05, -0.05, f"{t:.1f}s", color='black', fontsize=8, 
+                   horizontalalignment='center', verticalalignment='top')
+        
+        # Sample times for vectors (evenly spaced)
+        sample_times = np.arange(rel_start, rel_end, sample_interval)
+        
+        # Define colors for reference and control
+        reference_color = 'blue'
+        control_color = 'red'
+        
+        # Create legend handles manually
+        from matplotlib.lines import Line2D
+        legend_elements = [
+            Line2D([0], [0], color=reference_color, lw=2, label='Reference'),
+            Line2D([0], [0], color=control_color, lw=2, label='Control')
+        ]
+        
+        # Function to find the closest sample to a given time
+        def find_closest_sample(samples, target_time):
+            if not samples:
+                return None
+            closest_sample = min(samples, key=lambda s: abs(s['time'] - target_time))
+            if abs(closest_sample['time'] - target_time) > sample_interval:
+                return None
+            return closest_sample
+        
+        # Draw vectors at each sample time
+        for t in sample_times:
+            # Find closest reference and control samples
+            ref_sample = find_closest_sample(reference_samples, t)
+            ctrl_sample = find_closest_sample(control_samples, t)
+            
+            # Draw reference vector if available
+            if ref_sample:
+                vector = np.array(ref_sample[vector_type]) * vector_scale
+                # Only draw if vector magnitude is significant
+                if np.linalg.norm(vector) > 0.001:
+                    ax.quiver(t, 0, 0,           # Origin at time point on time axis
+                             0, vector[0], vector[1],  # Vector components
+                             color=reference_color, arrow_length_ratio=0.3)
+            
+            # Draw control vector if available
+            if ctrl_sample:
+                vector = np.array(ctrl_sample[vector_type]) * vector_scale
+                # Only draw if vector magnitude is significant
+                if np.linalg.norm(vector) > 0.001:
+                    ax.quiver(t, 0, 0,           # Origin at time point on time axis
+                             0, vector[0], vector[1],  # Vector components
+                             color=control_color, arrow_length_ratio=0.3)
+        
+        # Turn off all panes
+        ax.xaxis.pane.fill = False
+        ax.yaxis.pane.fill = False
+        ax.zaxis.pane.fill = False
+        
+        ax.xaxis.pane.set_edgecolor('none')
+        ax.yaxis.pane.set_edgecolor('none')
+        ax.zaxis.pane.set_edgecolor('none')
+        
+        # Turn off grid
+        ax.grid(False)
+        
+        # Turn off tick labels
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        ax.set_zticklabels([])
+        
+        # Hide all axes
+        ax.w_xaxis.line.set_color('black')
+        ax.w_yaxis.line.set_color((0,0,0,0))
+        ax.w_zaxis.line.set_color((0,0,0,0))
+        
+        # Set labels with minimal clutter
+        ax.set_xlabel('Time', fontsize=12, labelpad=-10)
+        
+        # Add title and legend
+        if vector_type == 'linear':
+            ax.set_title('Linear Control Vectors Over Time', fontsize=16)
+        else:
+            ax.set_title('Angular Control Vectors Over Time', fontsize=16)
+        
+        ax.legend(handles=legend_elements, loc='upper right')
+        
+        # Make the view horizontal to the screen (time axis horizontal)
+        ax.view_init(elev=20, azim=110)
+        
+        # Set equal aspect ratio for the y and z dimensions
+        # This makes the vectors look proportional
+        max_range = max(abs(np.array([-0.2, 0.2])))
+        ax.set_ylim(-max_range, max_range)
+        ax.set_zlim(-max_range, max_range)
+        
+        # Save the figure
+        output_filename = f"3d_{vector_type}_control_vectors.pdf"
+        plt.savefig(output_path / output_filename, bbox_inches='tight')
+        print(f"Saved 3D {vector_type} vector visualization to {output_path / output_filename}")
+        plt.close(fig)
+
 def plot_control_reference_time_series(reader, reference_conn, control_conn, start_time, end_time, output_path):
     """
     Plot reference and control signals over time.
@@ -1304,8 +1509,8 @@ def plot_control_reference_time_series(reader, reference_conn, control_conn, sta
         
         # Set a common y-axis label based on plot type
         if plot_type == 'linear':
-            fig.text(0.04, 0.5, 'Linear Velocity (m/s)', va='center', rotation='vertical', fontsize=12)
-            fig.suptitle('Linear Velocity Components Over Time', fontsize=16)
+            fig.text(0.04, 0.5, 'Control input', va='center', rotation='vertical', fontsize=12)
+            fig.suptitle('Control Components Over Time', fontsize=16)
         else:
             fig.text(0.04, 0.5, 'Angular Velocity (rad/s)', va='center', rotation='vertical', fontsize=12)
             fig.suptitle('Angular Velocity Components Over Time', fontsize=16)
@@ -1331,13 +1536,16 @@ def plot_control_reference_time_series(reader, reference_conn, control_conn, sta
             ax.legend(loc='upper right')
             
             # Set title for this component
-            ax.set_title(f'{axis.upper()}-axis {plot_type} velocity')
+            ax.set_title(f'{axis.upper()}-axis')
         
         # Save the figure
         output_filename = f"{plot_type}_velocity_control_reference.pdf"
         plt.savefig(output_path / output_filename, bbox_inches='tight')
         print(f"Saved {plot_type} velocity plot to {output_path / output_filename}")
         plt.close(fig)
+
+    # Create 3D time-vector visualization
+    create_3d_time_vector_visualization(reader, reference_conn, control_conn, start_time, end_time, output_path)
 
 def main():
     """Main entry point for the script."""
