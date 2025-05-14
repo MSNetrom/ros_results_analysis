@@ -61,11 +61,15 @@ def process_timestamp(bag_path, timestamp, output_folder):
         
         # Extract images
         extract_images(reader, target_timestamp, output_path)
+
+        
         
         # Create the new control visualization
         create_control_visualization(reader, target_timestamp, output_path,
                                    time_range=3.0,         # Time range in seconds
                                    distance_threshold=3.0)  # Max distance in meters
+        
+        process_sceneflow(reader, target_timestamp, output_path)
         
         # Visualize drone path and point cloud
         #generate_timeline_visualization(reader, target_timestamp, output_path, 
@@ -913,9 +917,9 @@ def create_control_visualization(reader, timestamp, output_path, time_range=10.0
             continue
         
         # Downsample if needed
-        if len(pc_data) > 2000:
-            indices = np.random.choice(len(pc_data), 2000, replace=False)
-            pc_data = pc_data[indices]
+        #if len(pc_data) > 2000:
+        #    indices = np.random.choice(len(pc_data), 2000, replace=False)
+        #    pc_data = pc_data[indices]
         
         # Get reference input
         reference_data = None
@@ -1030,22 +1034,16 @@ def get_closest_message(reader, connections, target_time, max_diff=float('inf'))
         return closest_msg
     return None
 
-def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=4.0):
+def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=1.0):
     """
-    Create a multi-panel visualization with point clouds and control data.
+    Create individual visualizations for point clouds and control data at each timestep.
     
     Args:
         snapshot_data: List of dictionaries with time, point_cloud, reference, and control
         output_path: Path to save the visualization
         zoom_factor: Factor to zoom in (higher values = more zoomed in)
     """
-    # Setup the figure with a 2x2 grid
-    fig = plt.figure(figsize=(16, 12))
-    
-    # Use a clean, minimalist style
-    plt.style.use('default')
-    
-    # Determine shared axis limits to keep the view consistent
+    # Determine shared axis limits to keep the view consistent across all snapshots
     all_points = np.vstack([data['point_cloud'] for data in snapshot_data])
     
     # Compute maximum absolute distance from origin in any dimension
@@ -1058,14 +1056,31 @@ def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=4.0):
     has_reference = any(data['reference'] for data in snapshot_data)
     has_control = any(data['control'] for data in snapshot_data)
     
-    # Create a subplot for each snapshot
+    # Create a separate figure for each snapshot
     for i, data in enumerate(snapshot_data):
-        ax = fig.add_subplot(2, 2, i+1, projection='3d')
+        # Create a new figure for this snapshot
+        fig = plt.figure(figsize=(10, 8))
         
-        # Set background grid 
-        ax.xaxis._axinfo["grid"].update({"color": (0.9, 0.9, 0.9, 0.8)})
-        ax.yaxis._axinfo["grid"].update({"color": (0.9, 0.9, 0.9, 0.8)})
-        ax.zaxis._axinfo["grid"].update({"color": (0.9, 0.9, 0.9, 0.8)})
+        # Use a clean, minimalist style
+        plt.style.use('default')
+        
+        # Create a single 3D subplot
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # Remove the grid
+        ax.grid(True)
+        
+        # Remove panes
+        ax.xaxis.pane.fill = False
+        ax.yaxis.pane.fill = False
+        ax.zaxis.pane.fill = False
+        ax.xaxis.pane.set_edgecolor('none')
+        ax.yaxis.pane.set_edgecolor('none')
+        ax.zaxis.pane.set_edgecolor('none')
+        
+        # Remove z-axis and tick labels for cleaner look
+        ax.zaxis.line.set_lw(0)
+        #ax.set_zticks([])
         
         # Plot the point cloud
         ax.scatter(
@@ -1083,13 +1098,13 @@ def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=4.0):
         ax.scatter([0], [0], [0], c='red', s=100, marker='o')
         
         # Set axis limits centered around origin (0,0,0)
-        ax.set_xlim(-0.2, max_abs_distance)
-        ax.set_ylim(-max_abs_distance, max_abs_distance)
-        ax.set_zlim(-max_abs_distance, max_abs_distance)
-        
-        # Invert X and Y axes so they go from positive to negative
-        #ax.invert_xaxis()
-        #ax.invert_yaxis()
+        #ax.set_xlim(0.5, max_abs_distance)
+        #ax.set_ylim(-max_abs_distance, max_abs_distance)
+        #ax.set_zlim(-max_abs_distance, max_abs_distance)
+
+        ax.set_xlim(1, 2.5)
+        ax.set_ylim(-1, 1)
+        ax.set_zlim(-1, 0.5)
         
         # Equal aspect ratio for all axes
         ax.set_box_aspect([1, 1, 1])
@@ -1097,10 +1112,11 @@ def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=4.0):
         # Set axis labels
         ax.set_xlabel('X (m)')
         ax.set_ylabel('Y (m)')
-        ax.set_zlabel('Z (m)')
+        # No z label for cleaner look
         
         # Set title with time
-        ax.set_title(f"Time: {data['time']:.2f}s", fontsize=12)
+        time_str = f"{data['time']:.2f}"
+        ax.set_title(f"Time: {time_str}s", fontsize=14)
         
         # Draw reference vector if available
         if data['reference'] and 'linear' in data['reference']:
@@ -1112,7 +1128,7 @@ def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=4.0):
                 if np.linalg.norm(ref_vector) > 0:
                     ax.quiver(0, 0, 0, 
                              ref_vector[0], ref_vector[1], ref_vector[2],
-                             color='limegreen', linewidth=2, label='Reference', 
+                             color='red', linewidth=2, label='Reference', 
                              arrow_length_ratio=0.15)
         
         # Draw control vector if available
@@ -1125,7 +1141,7 @@ def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=4.0):
                 if np.linalg.norm(ctrl_vector) > 0:
                     ax.quiver(0, 0, 0, 
                              ctrl_vector[0], ctrl_vector[1], ctrl_vector[2],
-                             color='#1f77b4', linewidth=2, label='Control', 
+                             color='limegreen', linewidth=2, label='Control', 
                              arrow_length_ratio=0.15)
         
         # Add legend if we're drawing vectors
@@ -1133,31 +1149,28 @@ def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=4.0):
             ax.legend(loc='upper right')
         
         # Set the view to make y-axis more horizontal and x-axis more vertical
-        ax.view_init(elev=50, azim=170)
+        ax.view_init(elev=30, azim=170)
+        
+        # Adjust layout
+        plt.tight_layout()
+        
+        # Create filenames with timestamp
+        png_filename = f"control_viz_t{time_str.replace('.', '_')}.png"
+        pdf_filename = f"control_viz_t{time_str.replace('.', '_')}.pdf"
+        
+        # Save as both PNG and PDF
+        dir_path = output_path / "snapshots"
+        dir_path.mkdir(parents=True, exist_ok=True)
+        pdf_path = dir_path / pdf_filename
+        
+        #plt.savefig(png_path, dpi=300, bbox_inches='tight')
+        plt.savefig(pdf_path, bbox_inches='tight')
+        print(f"Saved snapshot at t={time_str}s to {pdf_path}")
+        
+        # Close the figure to free memory
+        plt.close(fig)
     
-    # Add a main title
-    title = "Point Cloud Snapshots"
-    if has_reference and has_control:
-        title += " with Reference and Control Data"
-    elif has_reference:
-        title += " with Reference Data"
-    elif has_control:
-        title += " with Control Data"
-    plt.suptitle(title, fontsize=16)
-    
-    # Adjust layout
-    plt.tight_layout()
-    plt.subplots_adjust(top=0.92)
-
-    plt.show()
-    
-    # Save figure
-    output_file = output_path / 'control_visualization.png'
-    plt.savefig(output_file, dpi=300)
-    print(f"Saved control visualization to {output_file}")
-    
-    # Close the figure to free memory
-    plt.close(fig)
+    print(f"Saved {len(snapshot_data)} individual snapshot images to {output_path}")
 
 def main():
     """Main entry point for the script."""
