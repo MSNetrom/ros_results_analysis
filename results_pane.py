@@ -878,6 +878,11 @@ def create_control_visualization(reader, timestamp, output_path, time_range=10.0
         print(f"No point cloud topic found: {pointcloud_topic}")
         return
     
+    # Plot control and reference signals over time
+    if reference_conn or control_conn:
+        plot_control_reference_time_series(reader, reference_conn, control_conn, 
+                                          start_time, end_time, output_path)
+    
     # Get 4 evenly spaced time points
     num_snapshots = 4
     time_points = []
@@ -915,11 +920,6 @@ def create_control_visualization(reader, timestamp, output_path, time_range=10.0
         if len(pc_data) < 10:
             print(f"  Too few points after filtering at {relative_time:.2f}s")
             continue
-        
-        # Downsample if needed
-        #if len(pc_data) > 2000:
-        #    indices = np.random.choice(len(pc_data), 2000, replace=False)
-        #    pc_data = pc_data[indices]
         
         # Get reference input
         reference_data = None
@@ -1171,6 +1171,173 @@ def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=1.0):
         plt.close(fig)
     
     print(f"Saved {len(snapshot_data)} individual snapshot images to {output_path}")
+
+def plot_control_reference_time_series(reader, reference_conn, control_conn, start_time, end_time, output_path):
+    """
+    Plot reference and control signals over time.
+    
+    Args:
+        reader (AnyReader): Rosbag reader
+        reference_conn: Connection for reference messages
+        control_conn: Connection for control messages
+        start_time: Start timestamp in nanoseconds
+        end_time: End timestamp in nanoseconds
+        output_path: Path to save output plots
+    """
+    print(f"Collecting reference and control signals for time series plot...")
+    
+    # Data structures to store time series
+    reference_data = {
+        'timestamps': [],
+        'linear_x': [], 'linear_y': [], 'linear_z': [],
+        'angular_x': [], 'angular_y': [], 'angular_z': []
+    }
+    
+    control_data = {
+        'timestamps': [],
+        'linear_x': [], 'linear_y': [], 'linear_z': [],
+        'angular_x': [], 'angular_y': [], 'angular_z': []
+    }
+    
+    # Collect reference data
+    if reference_conn:
+        for conn, msg_timestamp, rawdata in reader.messages(connections=reference_conn):
+            # Skip messages outside time range
+            if msg_timestamp < start_time or msg_timestamp > end_time:
+                continue
+                
+            # Convert timestamp to seconds from bag start
+            rel_time = (msg_timestamp - reader.start_time) / 1e9
+            
+            try:
+                # Deserialize message
+                msg = reader.deserialize(rawdata, conn.msgtype)
+                
+                # Extract data based on message format
+                if hasattr(msg, 'twist') and hasattr(msg.twist, 'linear'):
+                    reference_data['timestamps'].append(rel_time)
+                    reference_data['linear_x'].append(msg.twist.linear.x)
+                    reference_data['linear_y'].append(msg.twist.linear.y)
+                    reference_data['linear_z'].append(msg.twist.linear.z)
+                    reference_data['angular_x'].append(msg.twist.angular.x)
+                    reference_data['angular_y'].append(msg.twist.angular.y)
+                    reference_data['angular_z'].append(msg.twist.angular.z)
+                elif hasattr(msg, 'velocity'):
+                    reference_data['timestamps'].append(rel_time)
+                    reference_data['linear_x'].append(msg.velocity.x)
+                    reference_data['linear_y'].append(msg.velocity.y)
+                    reference_data['linear_z'].append(msg.velocity.z)
+                    # Handle yaw rate if available
+                    if hasattr(msg, 'yaw_rate'):
+                        reference_data['angular_z'].append(msg.yaw_rate)
+                    else:
+                        reference_data['angular_z'].append(0.0)
+                    # Fill other angular with zeros if not available
+                    reference_data['angular_x'].append(0.0)
+                    reference_data['angular_y'].append(0.0)
+                elif hasattr(msg, 'linear') and hasattr(msg, 'angular'):
+                    reference_data['timestamps'].append(rel_time)
+                    reference_data['linear_x'].append(msg.linear.x)
+                    reference_data['linear_y'].append(msg.linear.y)
+                    reference_data['linear_z'].append(msg.linear.z)
+                    reference_data['angular_x'].append(msg.angular.x)
+                    reference_data['angular_y'].append(msg.angular.y)
+                    reference_data['angular_z'].append(msg.angular.z)
+            except Exception as e:
+                print(f"Error processing reference message: {e}")
+    
+    # Collect control data
+    if control_conn:
+        for conn, msg_timestamp, rawdata in reader.messages(connections=control_conn):
+            # Skip messages outside time range
+            if msg_timestamp < start_time or msg_timestamp > end_time:
+                continue
+                
+            # Convert timestamp to seconds from bag start
+            rel_time = (msg_timestamp - reader.start_time) / 1e9
+            
+            try:
+                # Deserialize message
+                msg = reader.deserialize(rawdata, conn.msgtype)
+                
+                # Extract data based on message format
+                if hasattr(msg, 'twist') and hasattr(msg.twist, 'linear'):
+                    control_data['timestamps'].append(rel_time)
+                    control_data['linear_x'].append(msg.twist.linear.x)
+                    control_data['linear_y'].append(msg.twist.linear.y)
+                    control_data['linear_z'].append(msg.twist.linear.z)
+                    control_data['angular_x'].append(msg.twist.angular.x)
+                    control_data['angular_y'].append(msg.twist.angular.y)
+                    control_data['angular_z'].append(msg.twist.angular.z)
+                elif hasattr(msg, 'linear') and hasattr(msg, 'angular'):
+                    control_data['timestamps'].append(rel_time)
+                    control_data['linear_x'].append(msg.linear.x)
+                    control_data['linear_y'].append(msg.linear.y)
+                    control_data['linear_z'].append(msg.linear.z)
+                    control_data['angular_x'].append(msg.angular.x)
+                    control_data['angular_y'].append(msg.angular.y)
+                    control_data['angular_z'].append(msg.angular.z)
+            except Exception as e:
+                print(f"Error processing control message: {e}")
+    
+    # Check if we have enough data to plot
+    if (len(reference_data['timestamps']) == 0 and len(control_data['timestamps']) == 0):
+        print("No reference or control data available for time series plot")
+        return
+    
+    print(f"Collected {len(reference_data['timestamps'])} reference points and {len(control_data['timestamps'])} control points")
+    
+    # Define component colors (darker for reference, lighter for control)
+    component_colors = {
+        'x': {'reference': '#0000AA', 'control': '#5555FF'},  # Dark and light blue
+        'y': {'reference': '#AA0000', 'control': '#FF5555'},  # Dark and light red
+        'z': {'reference': '#00AA00', 'control': '#55FF55'},  # Dark and light green
+    }
+    
+    # Create separate plots for linear and angular components
+    for plot_type in ['linear', 'angular']:
+        fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+        fig.tight_layout(pad=3.0)
+        
+        # Set a common x-axis label
+        fig.text(0.5, 0.04, 'Time (seconds)', ha='center', fontsize=12)
+        
+        # Set a common y-axis label based on plot type
+        if plot_type == 'linear':
+            fig.text(0.04, 0.5, 'Linear Velocity (m/s)', va='center', rotation='vertical', fontsize=12)
+            fig.suptitle('Linear Velocity Components Over Time', fontsize=16)
+        else:
+            fig.text(0.04, 0.5, 'Angular Velocity (rad/s)', va='center', rotation='vertical', fontsize=12)
+            fig.suptitle('Angular Velocity Components Over Time', fontsize=16)
+        
+        # Plot each component (x, y, z)
+        for i, axis in enumerate(['x', 'y', 'z']):
+            ax = axes[i]
+            
+            # Reference data
+            if len(reference_data['timestamps']) > 0:
+                ax.plot(reference_data['timestamps'], reference_data[f'{plot_type}_{axis}'], 
+                       color=component_colors[axis]['reference'], linewidth=2,
+                       label=f'Reference {axis.upper()}')
+            
+            # Control data
+            if len(control_data['timestamps']) > 0:
+                ax.plot(control_data['timestamps'], control_data[f'{plot_type}_{axis}'], 
+                       color=component_colors[axis]['control'], linewidth=2,
+                       label=f'Control {axis.upper()}')
+            
+            # Add grid and legend
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc='upper right')
+            
+            # Set title for this component
+            ax.set_title(f'{axis.upper()}-axis {plot_type} velocity')
+        
+        # Save the figure
+        output_filename = f"{plot_type}_velocity_control_reference.pdf"
+        plt.savefig(output_path / output_filename, bbox_inches='tight')
+        print(f"Saved {plot_type} velocity plot to {output_path / output_filename}")
+        plt.close(fig)
 
 def main():
     """Main entry point for the script."""
