@@ -1186,7 +1186,7 @@ def create_3d_time_vector_visualization(reader, reference_conn, control_conn, st
         end_time: End timestamp in nanoseconds
         output_path: Path to save output plots
         sample_interval: Time interval between vector samples (seconds)
-        vector_scale: Scaling factor for vector visualization (default: 0.05 - much shorter vectors)
+        vector_scale: Scaling factor for vector visualization (default: 0.05)
     """
     print(f"Creating 3D time-vector visualization...")
     
@@ -1273,13 +1273,18 @@ def create_3d_time_vector_visualization(reader, reference_conn, control_conn, st
         rel_start = (start_time - reader.start_time) / 1e9
         rel_end = (end_time - reader.start_time) / 1e9
         
-        # Draw time axis (a simple line from start to end)
+        # Draw time axis (a simple line exactly at the axis position)
         ax.plot([rel_start, rel_end], [0, 0], [0, 0], 'k-', linewidth=2)
         
-        # Add time ticks
+        # Add time ticks without labels (we'll add custom labels)
         time_ticks = np.linspace(rel_start, rel_end, 5)
+        
+        # Add custom tick marks and labels
         for t in time_ticks:
-            ax.text(t, -0.05, -0.05, f"{t:.1f}s", color='black', fontsize=8, 
+            # Small vertical line for tick mark
+            ax.plot([t, t], [0, -0.02], [0, 0], 'k-', linewidth=1)
+            # Label below the tick
+            ax.text(t, -0.04, 0, f"{t:.1f}s", color='black', fontsize=8, 
                    horizontalalignment='center', verticalalignment='top')
         
         # Sample times for vectors (evenly spaced)
@@ -1329,7 +1334,7 @@ def create_3d_time_vector_visualization(reader, reference_conn, control_conn, st
                              0, vector[0], vector[1],  # Vector components
                              color=control_color, arrow_length_ratio=0.3)
         
-        # Turn off all panes
+        # Turn off all panes and grids
         ax.xaxis.pane.fill = False
         ax.yaxis.pane.fill = False
         ax.zaxis.pane.fill = False
@@ -1341,32 +1346,28 @@ def create_3d_time_vector_visualization(reader, reference_conn, control_conn, st
         # Turn off grid
         ax.grid(False)
         
-        # Turn off tick labels
-        ax.set_xticklabels([])
-        ax.set_yticklabels([])
-        ax.set_zticklabels([])
-        
-        # Hide all axes
+        # Turn off all axis lines except x-axis (time)
         ax.w_xaxis.line.set_color('black')
-        ax.w_yaxis.line.set_color((0,0,0,0))
-        ax.w_zaxis.line.set_color((0,0,0,0))
+        ax.w_yaxis.line.set_color((0,0,0,0)) # transparent
+        ax.w_zaxis.line.set_color((0,0,0,0)) # transparent
         
-        # Set labels with minimal clutter
-        ax.set_xlabel('Time', fontsize=12, labelpad=-10)
+        # Turn off all tick marks and labels
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_zticks([])
         
-        # Add title and legend
-        if vector_type == 'linear':
-            ax.set_title('Linear Control Vectors Over Time', fontsize=16)
-        else:
-            ax.set_title('Angular Control Vectors Over Time', fontsize=16)
+        # No labels on any axis
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+        ax.set_zlabel('')
         
+        # Add legend in a non-intrusive location
         ax.legend(handles=legend_elements, loc='upper right')
         
         # Make the view horizontal to the screen (time axis horizontal)
         ax.view_init(elev=20, azim=110)
         
         # Set equal aspect ratio for the y and z dimensions
-        # This makes the vectors look proportional
         max_range = max(abs(np.array([-0.2, 0.2])))
         ax.set_ylim(-max_range, max_range)
         ax.set_zlim(-max_range, max_range)
