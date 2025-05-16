@@ -454,7 +454,7 @@ def plot_min_image_values(reader, timestamp, output_path, time_range=5.0):
                 print(f"Error processing {topic} at {seconds_from_start:.2f}s: {e}")
     
     # Create the plot
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(12, 4))
     
     # Target timestamp in seconds from start
     target_seconds = (timestamp - reader.start_time) / 1e9
@@ -474,12 +474,18 @@ def plot_min_image_values(reader, timestamp, output_path, time_range=5.0):
     # Add vertical line at target timestamp
     plt.axvline(x=target_seconds, color='green', linestyle='--', label='Target Time')
     
-    # Add labels and legend
-    plt.xlabel('Time (seconds from flight start)')
-    plt.ylabel('Minimum Values')
-    plt.title('Minimum Values Over Time ($v_0$ and $v_1$)')
-    plt.legend()
+    # Add labels and legend with increased font sizes
+    plt.xlabel('Time (seconds from flight start)', fontsize=14)
+    plt.ylabel('Minimum Values', fontsize=14)
+    plt.title('Minimum Values Over Time ($v_0$ and $v_1$)', fontsize=16)
+    plt.legend(fontsize=12)
     plt.grid(True)
+    
+    # Increase font size for tick labels
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
+
+    plt.tight_layout()
     
     # Save the plot using new naming convention
     plot_path = output_path / 'min_values_v0_v1.pdf'
@@ -832,6 +838,7 @@ def create_control_visualization(reader, timestamp, output_path, time_range=10.0
     
     # Define topics - expand the list of potential control/reference topics
     pointcloud_topic = '/depth_point_cloud'
+    color_image_topic = '/color_image'  # Add color image topic
     
     # Add more potential topics for reference and control data
     control_topics = [
@@ -844,6 +851,7 @@ def create_control_visualization(reader, timestamp, output_path, time_range=10.0
     
     # Find connections
     pointcloud_conn = [x for x in reader.connections if x.topic == pointcloud_topic]
+    color_image_conn = [x for x in reader.connections if x.topic == color_image_topic]  # Add connection for color images
     
     # Try to find reference topic connections
     reference_conn = []
@@ -877,6 +885,10 @@ def create_control_visualization(reader, timestamp, output_path, time_range=10.0
     if not pointcloud_conn:
         print(f"No point cloud topic found: {pointcloud_topic}")
         return
+    
+    # Check if we found color image topic
+    if not color_image_conn:
+        print(f"No color image topic found: {color_image_topic}")
     
     # Plot control and reference signals over time
     if reference_conn or control_conn:
@@ -920,6 +932,19 @@ def create_control_visualization(reader, timestamp, output_path, time_range=10.0
         if len(pc_data) < 10:
             print(f"  Too few points after filtering at {relative_time:.2f}s")
             continue
+        
+        # Get color image at the same time point
+        color_image = None
+        if color_image_conn:
+            try:
+                img_result = get_closest_message(reader, color_image_conn, time_point, max_diff=0.5 * 1e9)
+                if img_result:
+                    img_time, img_msg = img_result
+                    img_time_rel = (img_time - reader.start_time) / 1e9
+                    print(f"  Found color image at {img_time_rel:.2f}s")
+                    color_image = img_msg
+            except Exception as e:
+                print(f"  Error processing color image: {e}")
         
         # Get reference input
         reference_data = None
@@ -997,7 +1022,8 @@ def create_control_visualization(reader, timestamp, output_path, time_range=10.0
             'time': relative_time,
             'point_cloud': pc_data,
             'reference': reference_data,
-            'control': control_data
+            'control': control_data,
+            'color_image': color_image  # Add color image to snapshot data
         })
     
     # Create visualization if we have enough data
@@ -1036,10 +1062,11 @@ def get_closest_message(reader, connections, target_time, max_diff=float('inf'))
 
 def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=1.0):
     """
-    Create individual visualizations for point clouds and control data at each timestep.
+    Create individual visualizations for point clouds and control data at each timestep,
+    and save corresponding color images if available.
     
     Args:
-        snapshot_data: List of dictionaries with time, point_cloud, reference, and control
+        snapshot_data: List of dictionaries with time, point_cloud, reference, control, and color_image
         output_path: Path to save the visualization
         zoom_factor: Factor to zoom in (higher values = more zoomed in)
     """
@@ -1055,6 +1082,7 @@ def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=1.0):
     # Draw optional data
     has_reference = any(data['reference'] for data in snapshot_data)
     has_control = any(data['control'] for data in snapshot_data)
+    has_color_images = any(data['color_image'] for data in snapshot_data)
     
     # Create a separate figure for each snapshot
     for i, data in enumerate(snapshot_data):
@@ -1169,6 +1197,42 @@ def create_snapshot_visualization(snapshot_data, output_path, zoom_factor=1.0):
         
         # Close the figure to free memory
         plt.close(fig)
+        
+        # Save color image if available
+        if data['color_image']:
+            try:
+                # Convert the ROS image message to OpenCV format
+                image_msg = data['color_image']
+                
+                # Convert image data to numpy array
+                image_data = np.frombuffer(image_msg.data, dtype=np.uint8).reshape(
+                    image_msg.height, image_msg.width, -1)
+                
+                # Convert to BGR for OpenCV if needed based on encoding
+                if image_msg.encoding == 'rgb8':
+                    image = cv2.cvtColor(image_data, cv2.COLOR_RGB2BGR)
+                elif image_msg.encoding == 'rgba8':
+                    image = cv2.cvtColor(image_data, cv2.COLOR_RGBA2BGR)
+                elif image_msg.encoding == 'bgr8':
+                    image = image_data
+                elif image_msg.encoding == 'bgra8':
+                    image = cv2.cvtColor(image_data, cv2.COLOR_BGRA2BGR)
+                elif image_msg.encoding == 'mono8':
+                    image = cv2.cvtColor(image_data, cv2.COLOR_GRAY2BGR)
+                else:
+                    print(f"  Unsupported image encoding: {image_msg.encoding}. Skipping color image.")
+                    continue
+                
+                # Create file paths
+                img_filename = f"color_image_t{time_str.replace('.', '_')}.png"
+                img_path = dir_path / img_filename
+                
+                # Save the image
+                cv2.imwrite(str(img_path), image)
+                print(f"  Saved color image at t={time_str}s to {img_path}")
+                
+            except Exception as e:
+                print(f"  Error saving color image: {e}")
     
     print(f"Saved {len(snapshot_data)} individual snapshot images to {output_path}")
 
@@ -1291,8 +1355,8 @@ def create_3d_time_vector_visualization(reader, reference_conn, control_conn, st
         sample_times = np.arange(rel_start, rel_end, sample_interval)
         
         # Define colors for reference and control
-        reference_color = 'blue'
-        control_color = 'red'
+        reference_color = 'red'
+        control_color = 'limegreen'
         
         # Create legend handles manually
         from matplotlib.lines import Line2D
@@ -1365,7 +1429,7 @@ def create_3d_time_vector_visualization(reader, reference_conn, control_conn, st
         ax.legend(handles=legend_elements, loc='upper right')
         
         # Make the view horizontal to the screen (time axis horizontal)
-        ax.view_init(elev=20, azim=110)
+        ax.view_init(elev=30, azim=-120)
         
         # Set equal aspect ratio for the y and z dimensions
         max_range = max(abs(np.array([-0.2, 0.2])))
