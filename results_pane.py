@@ -204,7 +204,9 @@ def process_sceneflow(reader, timestamp, output_path):
         output_path (Path): Output directory
     """
     # Define the sceneflow topic
-    sceneflow_topic = '/scene_flow'
+    #sceneflow_topic = '/scene_flow'
+    sceneflow_topic = '/scene_flow_processed'
+    #sceneflow_topic = '/scene_flow_raw'
     
     # Find connection for the sceneflow topic
     connections = [x for x in reader.connections if x.topic == sceneflow_topic]
@@ -275,9 +277,9 @@ def visualize_sceneflow(pts, vecs, output_path):
         vecs (np.ndarray): Flow vectors, shape (N, 3)
     """
     # Filter out points where depth (z) is less than 0.1
-    depth_mask = pts[:, 2] >= 0.1
-    pts_filtered = pts[depth_mask]
-    vecs_filtered = vecs[depth_mask]
+    #depth_mask = pts[:, 2] >= 0.0
+    pts_filtered = pts
+    vecs_filtered = vecs
 
     # Optionally sample every Nth point/vector if the data is too dense
     pts_sampled = pts_filtered[::]

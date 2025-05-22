@@ -1,0 +1,21 @@
+Against wall 1: 
+
+
+Bag 1:
+
+Straight on, and kind of angle from 175 s
+Straight on 195 s
+Field of view 220 s
+Sliding at 298 s
+Sliding 310 s
+Weird slide 335 s
+Straight on hard! 345 s
+Straight on and sliding 355 s
+Landing 365 s
+
+Bag 2 - Starts at 851 s
+Dynamic 925 s : Did it start reacting before 1 meter away?
+Dynamic 950 s : Outside field of view
+
+Field of view error: 1088 - last file
+
