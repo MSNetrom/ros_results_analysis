@@ -3,17 +3,20 @@ Against wall 1:
 
 Bag 1:
 
-Straight on, and kind of angle from 175 s
+Straight on, and kind of angle from 175 s - Nice because it shows how one can just stop, not go backwards, not too high speed
 rosbag play -l ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag --start 176 --duration 10
+python3 results_pane.py ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag 182 results/straight_on1
 
 Straight on 195 s
 rosbag play -l ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag --start 192 --duration 10
+python3 results_pane.py ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag 200 results/straight_on2
 
 Field of view 220 s
 rosbag play -l ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag --start 215 --duration 10
 
 Sliding at 298 s - Bra sliding
 rosbag play -l ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag --start 295 --duration 10
+python3 results_pane.py ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag 300 results/sliding1
 
 Sliding 310 s - Ok slide
 rosbag play -l ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag --start 308 --duration 10
@@ -23,16 +26,19 @@ rosbag play -l ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-
 
 Straight on hard! 345 s
 rosbag play -l ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag --start 340 --duration 10
+python3 results_pane.py ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag 345 results/straight_on3
 
 Straight on and sliding 355 s
 rosbag play -l ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag --start 350 --duration 10
 
 Landing 365 s
 rosbag play -l ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag --start 365 --duration 10
+python3 results_pane.py ../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag 371 results/landing1
 
 Bag 2 - Starts at 851 s
 Dynamic 925 s - 74 s: Did it start reacting before 1 meter away?
 rosbag play -l ../sceneflow_bags/day4/drone_data_2025-05-22_11-28-10_2025-05-22-11-28-11.bag --start 70 --duration 10
+python3 results_pane.py ../sceneflow_bags/day4/drone_data_2025-05-22_11-28-10_2025-05-22-11-28-11.bag 73 results/dynamic1
 
 Dynamic 950 s - 99 s: Outside field of view
 rosbag play -l ../sceneflow_bags/day4/drone_data_2025-05-22_11-28-10_2025-05-22-11-28-11.bag --start 95 --duration 10
