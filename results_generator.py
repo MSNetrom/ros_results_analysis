@@ -4,7 +4,7 @@ import yaml
 import cv2
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Any, Union
+from typing import Dict, List, Any, Union, Tuple
 import bisect
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
@@ -123,12 +123,14 @@ class DataExtractor:
         return extracted
 
 class Processor(ABC):
+
     @abstractmethod
     def process(self,
                data: Dict[str, Dict[str, Union[List[Any], List[int]]]],
                input_mappings: Dict[str, str],
                output_dir: Path):
-        pass
+        
+        output_dir.mkdir(parents=True, exist_ok=True)
 
 class ImageProcessor(Processor):
 
@@ -143,6 +145,8 @@ class ImageProcessor(Processor):
 
 
     def process(self, data, input_mappings, output_dir):
+        
+        super().process(data, input_mappings, output_dir)
 
         topic = input_mappings.get('color_image')
 
@@ -156,11 +160,15 @@ class ImageProcessor(Processor):
             self._save_image(msg, ts, output_dir)
 
     def _save_image(self, msg, timestamp, output_dir):
+        
         filename = f"{self.params['filename_prefix']}{timestamp:.2f}.png"
         img = np.frombuffer(msg.data, np.uint8).reshape(msg.height, msg.width, -1)
         
         if msg.encoding in self.conversions and self.conversions[msg.encoding]:
             img = cv2.cvtColor(img, self.conversions[msg.encoding])
+
+        output_dir = output_dir / (self.params['filename_prefix'] + "color_images")
+        output_dir.mkdir(parents=True, exist_ok=True)
         
         cv2.imwrite(str(output_dir / filename), img)
 
