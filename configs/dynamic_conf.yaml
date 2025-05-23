@@ -22,7 +22,7 @@ processors:
 
 
   min_cbf_plot:
-    enabled: true
+    enabled: false
     type: "min_cbf_plot"
     input_mappings:
       v_0: "/raw_psi_image"
@@ -30,7 +30,7 @@ processors:
 
 
   u_safety_error_plot:
-    enabled: true
+    enabled: false
     type: "u_safety_error_plot"
     input_mappings:
       #u_ref: "/input_viz"
@@ -40,7 +40,7 @@ processors:
 
 
   u_ref_error_plot:
-    enabled: true
+    enabled: false
     type: "u_ref_error_plot"
     input_mappings:
       u_ref: "/input_viz"
@@ -50,7 +50,7 @@ processors:
 
 
   u_sizes_plot:
-    enabled: true
+    enabled: false
     type: "u_sizes_plot"
     input_mappings:
       u_ref: "/input_viz"
@@ -59,7 +59,23 @@ processors:
       u_actual: "/mavros/setpoint_raw/local_viz"
 
   velocity_size_plot:
-    enabled: true
+    enabled: false
     type: "velocity_size_plot"
     input_mappings:
       odometry: "/rig_node/odometry"
+
+  snapshot_visualization:
+    enabled: true
+    type: "snapshot_visualization"
+    input_mappings:
+      point_cloud: "/depth_point_cloud"
+      reference: "/input_viz"
+      control: "/control_vector_viz_raw"
+    params:
+      axis_limits:
+        x: [-1, 2.5]
+        y: [-1, 1]
+        z: [-1, 1]
+      view_angle:
+        elev: 10
+        azim: 90

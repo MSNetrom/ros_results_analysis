@@ -396,6 +396,173 @@ class VelocitySizePlotProcessor(Processor):
         plt.savefig(output_dir / "velocity_size_plot.pdf")
         plt.close()
 
+class SnapshotVisualizationProcessor(Processor):
+
+    def __init__(self, params: Dict):
+        super().__init__(params)
+        from mpl_toolkits.mplot3d import Axes3D
+
+    def _extract_point_cloud(self, msg):
+        """Extract XYZ points from PointCloud2 message"""
+        import struct
+        
+        # Parse PointCloud2 data
+        point_step = msg.point_step
+        row_step = msg.row_step
+        data = msg.data
+        
+        # Find XYZ field offsets
+        x_offset = y_offset = z_offset = None
+        for field in msg.fields:
+            if field.name == 'x':
+                x_offset = field.offset
+            elif field.name == 'y':
+                y_offset = field.offset
+            elif field.name == 'z':
+                z_offset = field.offset
+        
+        if None in (x_offset, y_offset, z_offset):
+            raise ValueError("Point cloud missing XYZ fields")
+        
+        points = []
+        for i in range(0, len(data), point_step):
+            if i + 12 <= len(data):  # Ensure we have enough data for XYZ
+                x = struct.unpack('f', data[i + x_offset:i + x_offset + 4])[0]
+                y = struct.unpack('f', data[i + y_offset:i + y_offset + 4])[0]
+                z = struct.unpack('f', data[i + z_offset:i + z_offset + 4])[0]
+                
+                # Filter out invalid points
+                if not (np.isnan(x) or np.isnan(y) or np.isnan(z) or np.isinf(x) or np.isinf(y) or np.isinf(z)):
+                    points.append([x, y, z])
+        
+        return np.array(points)
+
+    def _extract_control_vector(self, msg):
+        """Extract control vector from TwistStamped message"""
+        return np.array([msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z])
+
+    def _create_3d_plot(self, point_cloud, reference_vec, control_vec, timestamp, output_dir):
+        """Create and save 3D visualization"""
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        # Configure plot appearance
+        ax.grid(True)
+        ax.xaxis.pane.fill = False
+        ax.yaxis.pane.fill = False
+        ax.zaxis.pane.fill = False
+        ax.xaxis.pane.set_edgecolor('none')
+        ax.yaxis.pane.set_edgecolor('none')
+        ax.zaxis.pane.set_edgecolor('none')
+        
+        # Plot point cloud
+        if len(point_cloud) > 0:
+            ax.scatter(point_cloud[:, 0], point_cloud[:, 1], point_cloud[:, 2],
+                      c='lightblue', s=5, alpha=0.6, marker='o', edgecolors='none')
+        
+        # Plot origin (drone position)
+        ax.scatter([0], [0], [0], c='red', s=100, marker='o')
+        
+        # Plot reference vector if available
+        if reference_vec is not None and np.linalg.norm(reference_vec) > 0:
+            ax.quiver(0, 0, 0, reference_vec[0], reference_vec[1], reference_vec[2],
+                     color='red', linewidth=2, label='Reference', arrow_length_ratio=0.15)
+        
+        # Plot control vector if available
+        if control_vec is not None and np.linalg.norm(control_vec) > 0:
+            ax.quiver(0, 0, 0, control_vec[0], control_vec[1], control_vec[2],
+                     color='limegreen', linewidth=2, label='Control', arrow_length_ratio=0.15)
+        
+        # Set axis limits based on parameters
+        limits = self.params.get('axis_limits', {'x': [1, 2.5], 'y': [-1, 1], 'z': [-1, 0.5]})
+        ax.set_xlim(limits['x'])
+        ax.set_ylim(limits['y'])
+        ax.set_zlim(limits['z'])
+        
+        # Configure appearance
+        ax.set_box_aspect([1, 1, 1])
+        ax.set_xlabel('X (m)')
+        ax.set_ylabel('Y (m)')
+        ax.set_zlabel('Z (m)')
+        ax.set_title(f"Time: {timestamp:.2f}s", fontsize=14)
+        
+        # Set view angle
+        view_params = self.params.get('view_angle', {'elev': 30, 'azim': 170})
+        ax.view_init(elev=view_params['elev'], azim=view_params['azim'])
+        
+        # Add legend if vectors are present
+        if (reference_vec is not None and np.linalg.norm(reference_vec) > 0) or \
+           (control_vec is not None and np.linalg.norm(control_vec) > 0):
+            ax.legend(loc='upper right')
+        
+        plt.tight_layout()
+        
+        # Save plot
+        snapshots_dir = output_dir / "snapshots"
+        snapshots_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"control_viz_t{timestamp:.2f}".replace('.', '_') + ".pdf"
+        #plt.show()
+        plt.savefig(snapshots_dir / filename, bbox_inches='tight')
+        plt.close(fig)
+
+    def process(self, data, input_mappings, output_dir):
+        super().process(data, input_mappings, output_dir)
+
+        print(f"Processing snapshot visualization")
+        
+        # Get required topics
+        pc_topic = input_mappings.get('point_cloud')
+        ref_topic = input_mappings.get('reference')
+        ctrl_topic = input_mappings.get('control')
+        
+        if not pc_topic or pc_topic not in data:
+            print(f"Warning: Point cloud topic {pc_topic} not found")
+            return
+        
+        # Process each highlight timestamp
+        pc_highlights = data[pc_topic]['highlights']
+        pc_messages = data[pc_topic]['continuous']
+        
+        for idx in pc_highlights:
+
+            print(f"Processing point cloud at idx={idx}")
+
+            if idx >= len(pc_messages):
+                continue
+                
+            pc_msg = pc_messages[idx]
+            timestamp = convert_bag_time_in_nanoseconds_to_seconds(
+                data[pc_topic]['bag_start'], 
+                pc_msg.header.stamp.sec + pc_msg.header.stamp.nanosec / 1e9
+            )
+
+            print(f"Processing point cloud at t={timestamp:.2f}")
+            
+            # Extract point cloud
+            try:
+                point_cloud = self._extract_point_cloud(pc_msg)
+            except Exception as e:
+                print(f"Error extracting point cloud at t={timestamp:.2f}: {e}")
+                continue
+            
+            # Extract reference vector if available
+            reference_vec = None
+            if ref_topic and ref_topic in data:
+                ref_highlights = data[ref_topic]['highlights']
+                if idx < len(ref_highlights) and ref_highlights[idx] < len(data[ref_topic]['continuous']):
+                    ref_msg = data[ref_topic]['continuous'][ref_highlights[idx]]
+                    reference_vec = self._extract_control_vector(ref_msg)
+            
+            # Extract control vector if available
+            control_vec = None
+            if ctrl_topic and ctrl_topic in data:
+                ctrl_highlights = data[ctrl_topic]['highlights']
+                if idx < len(ctrl_highlights) and ctrl_highlights[idx] < len(data[ctrl_topic]['continuous']):
+                    ctrl_msg = data[ctrl_topic]['continuous'][ctrl_highlights[idx]]
+                    control_vec = self._extract_control_vector(ctrl_msg)
+            
+            # Create 3D visualization
+            self._create_3d_plot(point_cloud, reference_vec, control_vec, timestamp, output_dir)
 
 class ProcessorFactory:
     @staticmethod
@@ -406,7 +573,8 @@ class ProcessorFactory:
             "u_safety_error_plot": USafetyErrorPlotProcessor,
             "u_ref_error_plot": URefErrorPlotProcessor,
             "u_sizes_plot": USizesPlotProcessor,
-            "velocity_size_plot": VelocitySizePlotProcessor
+            "velocity_size_plot": VelocitySizePlotProcessor,
+            "snapshot_visualization": SnapshotVisualizationProcessor,
         }
         return processors[processor_type](params)
 
