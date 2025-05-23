@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from rosbags.highlevel import AnyReader
 from rosbags.typesys import Stores, get_typestore
-
+import matplotlib.pyplot as plt
 def convert_seconds_to_bag_time_in_nanoseconds(start_time: int, seconds: float):
     return start_time + int(seconds * 1e9)
 
@@ -124,6 +124,9 @@ class DataExtractor:
 
 class Processor(ABC):
 
+    def __init__(self, params: Dict):
+        self.params = params
+
     @abstractmethod
     def process(self,
                data: Dict[str, Dict[str, Union[List[Any], List[int]]]],
@@ -172,11 +175,66 @@ class ImageProcessor(Processor):
         
         cv2.imwrite(str(output_dir / filename), img)
 
+class MinCBFPlotProcessor(Processor):
+
+    def process(self, data, input_mappings, output_dir):
+        super().process(data, input_mappings, output_dir)
+
+        topic_v_0 = input_mappings.get('v_0')
+        topic_v_1 = input_mappings.get('v_1')
+
+        if not topic_v_0 or not topic_v_1 or topic_v_0 not in data or topic_v_1 not in data:
+            return
+        
+        v_0_messages = data[topic_v_0]['continuous']
+        v_1_messages = data[topic_v_1]['continuous']
+
+        # Convert image messages to numpy arrays and extract scalar values
+        v_0_values = []
+        v_1_values = []
+        timestamps = []
+        
+        for msg in v_0_messages:
+            float_img = np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
+            # Extract scalar value from image (modify this based on your needs)
+            scalar_value = np.min(float_img)  # or np.mean(img), img[0,0], etc.
+            v_0_values.append(scalar_value)
+            # Convert timestamp to seconds
+            ts = convert_bag_time_in_nanoseconds_to_seconds(
+                data[topic_v_0]['bag_start'], 
+                msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9
+            )
+            timestamps.append(ts)
+        
+        for msg in v_1_messages:
+            float_img = np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
+            # Extract scalar value from image (modify this based on your needs)
+            scalar_value = np.min(float_img)  # or np.mean(img), img[0,0], etc.
+            v_1_values.append(scalar_value)
+
+        # Make timestamps relative to start of interval
+        timestamps = np.array(timestamps)
+        timestamps -= timestamps[0]
+        
+        # Make plot from all timestamps in range
+        plt.figure(figsize=(10, 6))
+        plt.plot(timestamps, v_0_values, label="$v_0$")
+        plt.plot(timestamps, v_1_values, label="$v_1$")
+        plt.legend()
+        plt.xlabel("Time (seconds)")
+        plt.ylabel("Value")
+        plt.title("Min CBF Plot")
+        plt.grid(True)
+
+        plt.savefig(output_dir / "min_cbf_plot.pdf")
+        plt.close()
+
 class ProcessorFactory:
     @staticmethod
     def create(processor_type: str, params: Dict) -> Processor:
         processors = {
             "image": ImageProcessor,
+            "min_cbf_plot": MinCBFPlotProcessor
         }
         return processors[processor_type](params)
 
