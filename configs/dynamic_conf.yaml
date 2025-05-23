@@ -1,0 +1,42 @@
+# config.yaml
+bag_processing:
+  bag_path: "../sceneflow_bags/day4/drone_data_2025-05-22_11-28-10_2025-05-22-11-28-11.bag"
+  timestamps: [72, 72.5, 73, 73.5, 74]  # Seconds from bag start
+  output_dir: "./results/dynamic1"
+  ros_version: "ROS1"
+  max_time_diff: 0.1  # Max allowed time difference in seconds
+
+topics:
+  - name: "/color_image"
+    processor: "image"
+    params:
+      encoding: "bgr8"
+      filename_prefix: "camera_"
+
+  - name: "/lidar/points"
+    processor: "pointcloud"
+    params:
+      voxel_size: 0.1
+      visualize: true
+
+  - name: "/scene_flow"
+    processor: "sceneflow"
+    params:
+      vector_scale: 0.5
+      visualize: true
+
+processors:
+  image:
+    enabled: true
+    output_format: "png"
+    quality: 95
+
+  pointcloud:
+    enabled: false
+    downsample: true
+
+  sceneflow:
+    enabled: false
+    visualization_params:
+      camera_position: [5, 5, 5]
+      lookat: [0, 0, 0]
