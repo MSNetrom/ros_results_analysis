@@ -1,17 +1,21 @@
 # config.yaml
 bag_processing:
   bag_path: "../sceneflow_bags/day4/drone_data_2025-05-22_11-28-10_2025-05-22-11-28-11.bag"
-  timestamps: [72, 72.5, 73, 73.5, 74]  # Seconds from bag start
   output_dir: "./results/dynamic1"
   ros_version: "ROS1"
   max_time_diff: 0.1  # Max allowed time difference in seconds
 
+  interval:
+    start: 72
+    end: 74
+    highlights: [72, 72.5, 73, 73.5, 74]
+
 processors:
 
-  front_camera:
+  color_image:
       enabled: true
       type: "image"
       input_mappings:
         color_image: "/color_image"
       params:
-        filename_prefix: "front_"
+        filename_prefix: "color_image_"
