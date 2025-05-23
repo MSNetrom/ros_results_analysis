@@ -1,25 +1,21 @@
+from collections import defaultdict
 import argparse
 import yaml
 import cv2
 import numpy as np
-import open3d as o3d
 from pathlib import Path
-from typing import Dict, List, Any, Type
+from typing import Dict, List, Any
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from rosbags.highlevel import AnyReader
 from rosbags.typesys import Stores, get_typestore
 
 @dataclass
-class TopicConfig:
-    name: str
-    processor: str
-    params: Dict[str, Any]
-
-@dataclass
 class ProcessorConfig:
     enabled: bool
+    type: str
     params: Dict[str, Any]
+    input_mappings: Dict[str, str]  # Logical -> Actual topic
 
 class BagProcessingConfig:
     def __init__(self, config_path: Path):
@@ -33,21 +29,15 @@ class BagProcessingConfig:
         self.ros_version = bp['ros_version']
         self.max_time_diff_ns = int(bp['max_time_diff'] * 1e9)
         
-        self.topics = [
-            TopicConfig(
-                name=t['name'],
-                processor=t['processor'],
-                params=t.get('params', {})
-            ) for t in config['topics']
-        ]
-        
-        self.processors = {
-            name: ProcessorConfig(
-                enabled=config['processors'][name].get('enabled', True),
-                params=config['processors'][name].get('params', {})
-            ) for name in config['processors']
-        }
-    
+        self.processors = {}
+        for name, cfg in config['processors'].items():
+            self.processors[name] = ProcessorConfig(
+                enabled=cfg.get('enabled', True),
+                type=cfg['type'],
+                params=cfg.get('params', {}),
+                input_mappings=cfg.get('input_mappings', {})
+            )
+
     def validate(self):
         if not self.bag_path.exists():
             raise ValueError(f"Bag file {self.bag_path} not found")
@@ -59,46 +49,83 @@ class DataExtractor:
         self.typestore = get_typestore(Stores.ROS1_NOETIC if 
             config.ros_version == "ROS1" else Stores.LATEST)
 
-    def extract(self) -> Dict[float, Dict[str, Any]]:
-        extracted = {}
+    def extract(self) -> Dict[str, List[Any]]:
+        
+        extracted = defaultdict(list)
+        required_topics = set()
+        
+        # Collect all unique topics from all processor mappings
+        for proc in self.config.processors.values():
+            if proc.enabled:
+                required_topics.update(proc.input_mappings.values())
+
         with AnyReader([self.config.bag_path]) as reader:
             bag_start = reader.start_time
-            
-            for ts in self.config.timestamps:
-                target_ns = bag_start + int(ts * 1e9)
-                extracted[ts] = self._extract_at_time(reader, target_ns)
-                
-        return extracted
+            target_ns = [bag_start + int(ts * 1e9) for ts in self.config.timestamps]
 
-    def _extract_at_time(self, reader, target_time: int) -> Dict[str, Any]:
-        results = {}
-        for topic_cfg in self.config.topics:
-            conns = [c for c in reader.connections if c.topic == topic_cfg.name]
-            if not conns:
-                continue
+            for topic in required_topics:
+                conns = [c for c in reader.connections if c.topic == topic]
+                if not conns:
+                    continue
                 
-            closest = None
-            min_diff = self.config.max_time_diff_ns
-            
-            for conn, msg_time, rawdata in reader.messages(connections=conns):
-                current_diff = abs(msg_time - target_time)
+                # Get all messages for this topic
+                messages = []
+                times = []
+                for conn, timestamp, rawdata in reader.messages(connections=conns):
+                    messages.append((conn, timestamp, rawdata))
+                    times.append(timestamp)
                 
-                if current_diff < min_diff:
-                    min_diff = current_diff
-                    closest = (conn, rawdata)
+                # Convert to numpy arrays for vectorized operations
+                times_np = np.array(times)
+                
+                # Find closest indices for all targets at once
+                indices = np.searchsorted(times_np, target_ns, side='left')
+                
+                # Collect candidates
+                candidates = []
+                for i, idx in enumerate(indices):
+                    ts_target = target_ns[i]
+                    candidates_for_ts = []
                     
-                if msg_time > target_time and current_diff > 2 * min_diff:
-                    break
+                    # Check previous message
+                    if idx > 0:
+                        candidates_for_ts.append(messages[idx-1])
                     
-            if closest:
-                conn, rawdata = closest
-                results[topic_cfg.name] = reader.deserialize(rawdata, conn.msgtype)
+                    # Check current message
+                    if idx < len(messages):
+                        candidates_for_ts.append(messages[idx])
+                    
+                    # Find best candidate for this timestamp
+                    if candidates_for_ts:
+                        best = min(candidates_for_ts, key=lambda x: abs(x[1] - ts_target))
+                        candidates.append(best)
+                    else:
+                        candidates.append(None)
                 
-        return results
+                # Process candidates in batch
+                for i, candidate in enumerate(candidates):
+                    if candidate is None:
+                        extracted[topic].append(None)
+                        continue
+                        
+                    conn, msg_time, rawdata = candidate
+                    if abs(msg_time - target_ns[i]) > self.config.max_time_diff_ns:
+                        extracted[topic].append(None)
+                        continue
+                        
+                    # Deserialize and store
+                    msg = reader.deserialize(rawdata, conn.msgtype)
+                    extracted[topic].append(msg)
+
+        return extracted
 
 class Processor(ABC):
     @abstractmethod
-    def process(self, timestamp: float, messages: Dict[str, Any], output_dir: Path):
+    def process(self, 
+               timestamps: List[float], 
+               data: Dict[str, List[Any]],
+               input_mappings: Dict[str, str],
+               output_dir: Path):
         pass
 
 class ImageProcessor(Processor):
@@ -111,12 +138,21 @@ class ImageProcessor(Processor):
             'bgra8': cv2.COLOR_BGRA2BGR
         }
 
-    def process(self, timestamp: float, messages: Dict[str, Any], output_dir: Path):
-        for topic, msg in messages.items():
-            if not hasattr(msg, 'encoding'):
+    def process(self, 
+               timestamps: List[float], 
+               data: Dict[str, List[Any]],
+               input_mappings: Dict[str, str],
+               output_dir: Path):
+        # Use processor-specific mapping
+        topic_name = input_mappings.get('color_image')
+        if not topic_name or topic_name not in data:
+            return
+
+        for i, (ts, msg) in enumerate(zip(timestamps, data[topic_name])):
+            if msg is None:
                 continue
                 
-            filename = f"{self.params['filename_prefix']}{timestamp:.2f}.png"
+            filename = f"{self.params['filename_prefix']}{ts:.2f}.png"
             img = np.frombuffer(msg.data, np.uint8).reshape(msg.height, msg.width, -1)
             
             if msg.encoding in self.conversions and self.conversions[msg.encoding]:
@@ -124,46 +160,14 @@ class ImageProcessor(Processor):
             
             cv2.imwrite(str(output_dir / filename), img)
 
-class SceneFlowProcessor(Processor):
-    def __init__(self, params: Dict):
-        self.params = params
-        self.vis = o3d.visualization.Visualizer()
-
-    def process(self, timestamp: float, messages: Dict[str, Any], output_dir: Path):
-        if '/scene_flow' not in messages:
-            return
-            
-        msg = messages['/scene_flow']
-        pts = np.array([[p.x, p.y, p.z] for p in msg.points])
-        vecs = np.array([[v.x, v.y, v.z] for v in msg.flow_vectors]) * self.params['vector_scale']
-        
-        self._create_visualization(pts, vecs, output_dir / f"sceneflow_{timestamp:.2f}.png")
-
-    def _create_visualization(self, pts, vecs, path: Path):
-        self.vis.create_window()
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(pts)
-        
-        lines = []
-        for i, vec in enumerate(vecs):
-            lines.append([i, i+len(pts)])
-        line_set = o3d.geometry.LineSet()
-        line_set.points = o3d.utility.Vector3dVector(np.vstack([pts, pts+vecs]))
-        line_set.lines = o3d.utility.Vector2iVector(lines)
-        
-        self.vis.add_geometry(pcd)
-        self.vis.add_geometry(line_set)
-        self.vis.capture_screen_image(str(path))
-        self.vis.destroy_window()
-
 class ProcessorFactory:
     @staticmethod
-    def create(processor_type: str, params: Dict) -> Processor:
+    def create(config: ProcessorConfig) -> Processor:
         processors = {
             "image": ImageProcessor,
-            "sceneflow": SceneFlowProcessor,
+            # Add other processor types here
         }
-        return processors[processor_type](params)
+        return processors[config.type](config.params)
 
 def main(config_path: Path):
     config = BagProcessingConfig(config_path)
@@ -173,16 +177,19 @@ def main(config_path: Path):
     data = extractor.extract()
     
     processors = []
-    for topic_cfg in config.topics:
-        if config.processors[topic_cfg.processor].enabled:
-            processors.append(ProcessorFactory.create(
-                topic_cfg.processor,
-                {**topic_cfg.params, **config.processors[topic_cfg.processor].params}
-            ))
+    for name, proc_cfg in config.processors.items():
+        if proc_cfg.enabled:
+            processor = ProcessorFactory.create(proc_cfg)
+            processors.append((processor, proc_cfg.input_mappings))
     
-    for ts, messages in data.items():
-        for processor in processors:
-            processor.process(ts, messages, config.output_dir)
+    # Pass processor-specific mappings to each processor
+    for processor, mappings in processors:
+        processor.process(
+            config.timestamps, 
+            data, 
+            mappings,
+            config.output_dir
+        )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
