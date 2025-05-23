@@ -11,6 +11,15 @@ from abc import ABC, abstractmethod
 from rosbags.highlevel import AnyReader
 from rosbags.typesys import Stores, get_typestore
 import matplotlib.pyplot as plt
+
+
+COLORS = {
+    "u_safe": "green",
+    "u_filtered": "blue",
+    "u_actual": "orange",
+    "u_ref": "purple",
+}
+
 def convert_seconds_to_bag_time_in_nanoseconds(start_time: int, seconds: float):
     return start_time + int(seconds * 1e9)
 
@@ -127,6 +136,18 @@ class Processor(ABC):
     def __init__(self, params: Dict):
         self.params = params
 
+    def get_timestamps_of_message_list(self, messages: List[Any], bag_start: int, zero_based: bool = True):
+        timestamps = []
+        for msg in messages:
+            timestamps.append(convert_bag_time_in_nanoseconds_to_seconds(bag_start, msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9))
+
+        timestamps = np.array(timestamps)
+
+        if zero_based:
+            timestamps -= timestamps[0]
+
+        return timestamps
+
     @abstractmethod
     def process(self,
                data: Dict[str, Dict[str, Union[List[Any], List[int]]]],
@@ -192,19 +213,13 @@ class MinCBFPlotProcessor(Processor):
         # Convert image messages to numpy arrays and extract scalar values
         v_0_values = []
         v_1_values = []
-        timestamps = []
         
         for msg in v_0_messages:
             float_img = np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
             # Extract scalar value from image (modify this based on your needs)
             scalar_value = np.min(float_img)  # or np.mean(img), img[0,0], etc.
             v_0_values.append(scalar_value)
-            # Convert timestamp to seconds
-            ts = convert_bag_time_in_nanoseconds_to_seconds(
-                data[topic_v_0]['bag_start'], 
-                msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9
-            )
-            timestamps.append(ts)
+            
         
         for msg in v_1_messages:
             float_img = np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
@@ -213,28 +228,185 @@ class MinCBFPlotProcessor(Processor):
             v_1_values.append(scalar_value)
 
         # Make timestamps relative to start of interval
-        timestamps = np.array(timestamps)
-        timestamps -= timestamps[0]
-        
+        timestamps = self.get_timestamps_of_message_list(v_0_messages, data[topic_v_0]['bag_start'])
+
         # Make plot from all timestamps in range
         plt.figure(figsize=(10, 6))
-        plt.plot(timestamps, v_0_values, label="$v_0$")
-        plt.plot(timestamps, v_1_values, label="$v_1$")
-        plt.legend()
-        plt.xlabel("Time (seconds)")
-        plt.ylabel("Value")
-        plt.title("Min CBF Plot")
+        plt.plot(timestamps, v_0_values, label="$v_0$", linewidth=2)
+        plt.plot(timestamps, v_1_values, label="$v_1$", linewidth=2)
+        plt.legend(fontsize=14)
+        plt.xlabel("Time (seconds)", fontsize=14)
+        plt.ylabel("Value", fontsize=14)
+        plt.title("Min CBF Plot", fontsize=14)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
         plt.grid(True)
 
         plt.savefig(output_dir / "min_cbf_plot.pdf")
         plt.close()
+
+class USafetyErrorPlotProcessor(Processor):
+
+    def _extract_values_from_message(self, twist_stamped_list):
+
+        values = []
+        for msg in twist_stamped_list:
+            values.append([msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z])
+        return np.array(values)
+
+    def process(self, data, input_mappings, output_dir):
+        super().process(data, input_mappings, output_dir)
+
+        u_safe = data[input_mappings['u_safe']]['continuous']
+        u_filtered = data[input_mappings['u_filtered']]['continuous']
+        u_actual = data[input_mappings['u_actual']]['continuous']
+
+        u_safe_values = self._extract_values_from_message(u_safe)
+        u_filtered_values = self._extract_values_from_message(u_filtered)
+        u_actual_values = self._extract_values_from_message(u_actual)
+        timestamps = self.get_timestamps_of_message_list(u_safe, data[input_mappings['u_safe']]['bag_start'])
+
+        # Get distance from safe to the others
+        distances_filtered = np.linalg.norm(u_safe_values - u_filtered_values, axis=1)
+        distances_actual = np.linalg.norm(u_safe_values - u_actual_values, axis=1)
+
+        # Make plot from all timestamps in range
+        plt.figure(figsize=(12, 6))
+        plt.plot(timestamps, distances_filtered, label="Filtered", color=COLORS["u_filtered"], linewidth=2)
+        plt.plot(timestamps, distances_actual, label="Final (clamped)", color=COLORS["u_actual"], linewidth=2)
+        plt.legend(fontsize=14)
+        plt.xlabel("Time [s]", fontsize=14)
+        plt.ylabel("Distance [$m/s^2$]", fontsize=14)
+        plt.title("Difference between safe and filtered/final control vector", fontsize=14)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.grid(True)
+
+        plt.savefig(output_dir / "u_safety_error_plot.pdf")
+        plt.close()
+
+class URefErrorPlotProcessor(USafetyErrorPlotProcessor):
+
+    def process(self, data, input_mappings, output_dir):
+        Processor.process(self, data, input_mappings, output_dir)
+
+        u_ref = data[input_mappings['u_ref']]['continuous']
+        u_safe = data[input_mappings['u_safe']]['continuous']
+        u_filtered = data[input_mappings['u_filtered']]['continuous']
+        u_actual = data[input_mappings['u_actual']]['continuous']
+
+        u_ref_values = self._extract_values_from_message(u_ref)
+        u_safe_values = self._extract_values_from_message(u_safe)
+        u_filtered_values = self._extract_values_from_message(u_filtered)
+        u_actual_values = self._extract_values_from_message(u_actual)
+
+        distance_safe = np.linalg.norm(u_ref_values - u_safe_values, axis=1)
+        distance_filtered = np.linalg.norm(u_ref_values - u_filtered_values, axis=1)
+        distance_actual = np.linalg.norm(u_ref_values - u_actual_values, axis=1)
+
+        timestamps = self.get_timestamps_of_message_list(u_ref, data[input_mappings['u_ref']]['bag_start'])
+
+        plt.figure(figsize=(12, 6))
+        plt.plot(timestamps, distance_safe, label="Safe", color=COLORS["u_safe"], linewidth=2)
+        plt.plot(timestamps, distance_filtered, label="Filtered", color=COLORS["u_filtered"], linewidth=2)
+        plt.plot(timestamps, distance_actual, label="Final (clamped)", color=COLORS["u_actual"], linewidth=2)
+        plt.legend(fontsize=14)
+        plt.xlabel("Time [s]", fontsize=14)
+        plt.ylabel("Distance [$m/s^2$]", fontsize=14)
+        plt.title("Difference between reference and safe/filtered/final control vector", fontsize=14)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.grid(True)
+
+        plt.savefig(output_dir / "u_ref_error_plot.pdf")
+        plt.close()
+        
+class USizesPlotProcessor(USafetyErrorPlotProcessor):
+
+    def process(self, data, input_mappings, output_dir):
+        Processor.process(self, data, input_mappings, output_dir)
+
+        u_ref = data[input_mappings['u_ref']]['continuous']
+        u_safe = data[input_mappings['u_safe']]['continuous']
+        u_filtered = data[input_mappings['u_filtered']]['continuous']
+        u_actual = data[input_mappings['u_actual']]['continuous']
+
+        u_ref_sizes = np.linalg.norm(self._extract_values_from_message(u_ref), axis=1)
+        u_safe_sizes = np.linalg.norm(self._extract_values_from_message(u_safe), axis=1)
+        u_filtered_sizes = np.linalg.norm(self._extract_values_from_message(u_filtered), axis=1)
+        u_actual_sizes = np.linalg.norm(self._extract_values_from_message(u_actual), axis=1)
+
+        timestamps = self.get_timestamps_of_message_list(u_ref, data[input_mappings['u_ref']]['bag_start'])
+
+        plt.figure(figsize=(12, 6))
+        plt.plot(timestamps, u_safe_sizes, label="Safe", color=COLORS["u_safe"], linewidth=2)
+        plt.plot(timestamps, u_filtered_sizes, label="Filtered", color=COLORS["u_filtered"], linewidth=2)
+        plt.plot(timestamps, u_actual_sizes, label="Final (clamped)", color=COLORS["u_actual"], linewidth=2)
+        plt.plot(timestamps, u_ref_sizes, label="Reference", linestyle='--', linewidth=4, color=COLORS["u_ref"])
+        plt.legend(fontsize=14)
+
+        plt.xlabel("Time [s]", fontsize=14)
+        plt.ylabel("Size [$m/s^2$]", fontsize=14)
+        plt.title("Size of control vectors", fontsize=14)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.grid(True)
+
+        plt.savefig(output_dir / "u_sizes_plot.pdf")
+        plt.close()
+
+
+class VelocitySizePlotProcessor(Processor):
+
+    def process(self, data, input_mappings, output_dir):
+        super().process(data, input_mappings, output_dir)
+
+        topic = input_mappings.get('odometry')
+        
+        if not topic or topic not in data:
+            return
+        
+        odometry_messages = data[topic]['continuous']
+        
+        # Extract linear velocity values from odometry messages
+        velocity_values = []
+        for msg in odometry_messages:
+            linear_vel = [msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.linear.z]
+            velocity_values.append(linear_vel)
+        
+        velocity_values = np.array(velocity_values)
+        
+        # Calculate velocity magnitudes (sizes)
+        velocity_sizes = np.linalg.norm(velocity_values, axis=1)
+        
+        # Get timestamps relative to start
+        timestamps = self.get_timestamps_of_message_list(odometry_messages, data[topic]['bag_start'])
+        
+        # Create velocity magnitude plot
+        plt.figure(figsize=(12, 6))
+        plt.plot(timestamps, velocity_sizes, label="Velocity magnitude", linewidth=2)
+        plt.legend(fontsize=14)
+        plt.xlabel("Time [s]", fontsize=14)
+        plt.ylabel("Velocity [m/s]", fontsize=14)
+        plt.title("Robot velocity magnitude over time", fontsize=14)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.grid(True)
+        
+        plt.savefig(output_dir / "velocity_size_plot.pdf")
+        plt.close()
+
 
 class ProcessorFactory:
     @staticmethod
     def create(processor_type: str, params: Dict) -> Processor:
         processors = {
             "image": ImageProcessor,
-            "min_cbf_plot": MinCBFPlotProcessor
+            "min_cbf_plot": MinCBFPlotProcessor,
+            "u_safety_error_plot": USafetyErrorPlotProcessor,
+            "u_ref_error_plot": URefErrorPlotProcessor,
+            "u_sizes_plot": USizesPlotProcessor,
+            "velocity_size_plot": VelocitySizePlotProcessor
         }
         return processors[processor_type](params)
 

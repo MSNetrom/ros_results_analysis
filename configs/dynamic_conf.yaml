@@ -13,7 +13,7 @@ bag_processing:
 processors:
 
   color_image:
-    enabled: true
+    enabled: false
     type: "image"
     input_mappings:
       color_image: "/color_image"
@@ -27,3 +27,39 @@ processors:
     input_mappings:
       v_0: "/raw_psi_image"
       v_1: "/raw_h_image"
+
+
+  u_safety_error_plot:
+    enabled: true
+    type: "u_safety_error_plot"
+    input_mappings:
+      #u_ref: "/input_viz"
+      u_safe: "/control_vector_viz_unfiltered"
+      u_filtered: "/control_vector_viz_raw"
+      u_actual: "/mavros/setpoint_raw/local_viz"
+
+
+  u_ref_error_plot:
+    enabled: true
+    type: "u_ref_error_plot"
+    input_mappings:
+      u_ref: "/input_viz"
+      u_safe: "/control_vector_viz_unfiltered"
+      u_filtered: "/control_vector_viz_raw"
+      u_actual: "/mavros/setpoint_raw/local_viz"
+
+
+  u_sizes_plot:
+    enabled: true
+    type: "u_sizes_plot"
+    input_mappings:
+      u_ref: "/input_viz"
+      u_safe: "/control_vector_viz_unfiltered"
+      u_filtered: "/control_vector_viz_raw"
+      u_actual: "/mavros/setpoint_raw/local_viz"
+
+  velocity_size_plot:
+    enabled: true
+    type: "velocity_size_plot"
+    input_mappings:
+      odometry: "/rig_node/odometry"
