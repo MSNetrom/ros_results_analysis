@@ -129,6 +129,8 @@ class DataExtractor:
                 
                 extracted[topic]['highlights'] = highlight_indices
 
+                extracted[topic]['timestamps'] = times
+
         return extracted
 
 class Processor(ABC):
@@ -402,47 +404,23 @@ class SnapshotVisualizationProcessor(Processor):
         super().__init__(params)
         from mpl_toolkits.mplot3d import Axes3D
 
-    def _extract_point_cloud(self, msg):
-        """Extract XYZ points from PointCloud2 message"""
-        import struct
+    def _extract_sceneflow_data(self, msg):
+        """Extract points and flow vectors from sceneflow message"""
+        pts = np.array([[pt.x, pt.y, pt.z] for pt in msg.points])
+        vecs = np.array([[vec.x, vec.y, vec.z] for vec in msg.flow_vectors])
         
-        # Parse PointCloud2 data
-        point_step = msg.point_step
-        row_step = msg.row_step
-        data = msg.data
+        # Filter out invalid points and vectors
+        valid_mask = ~(np.isnan(pts).any(axis=1) | np.isinf(pts).any(axis=1) | 
+                      np.isnan(vecs).any(axis=1) | np.isinf(vecs).any(axis=1))
         
-        # Find XYZ field offsets
-        x_offset = y_offset = z_offset = None
-        for field in msg.fields:
-            if field.name == 'x':
-                x_offset = field.offset
-            elif field.name == 'y':
-                y_offset = field.offset
-            elif field.name == 'z':
-                z_offset = field.offset
-        
-        if None in (x_offset, y_offset, z_offset):
-            raise ValueError("Point cloud missing XYZ fields")
-        
-        points = []
-        for i in range(0, len(data), point_step):
-            if i + 12 <= len(data):  # Ensure we have enough data for XYZ
-                x = struct.unpack('f', data[i + x_offset:i + x_offset + 4])[0]
-                y = struct.unpack('f', data[i + y_offset:i + y_offset + 4])[0]
-                z = struct.unpack('f', data[i + z_offset:i + z_offset + 4])[0]
-                
-                # Filter out invalid points
-                if not (np.isnan(x) or np.isnan(y) or np.isnan(z) or np.isinf(x) or np.isinf(y) or np.isinf(z)):
-                    points.append([x, y, z])
-        
-        return np.array(points)
+        return pts[valid_mask], vecs[valid_mask]
 
     def _extract_control_vector(self, msg):
         """Extract control vector from TwistStamped message"""
         return np.array([msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z])
 
-    def _create_3d_plot(self, point_cloud, reference_vec, control_vec, timestamp, output_dir):
-        """Create and save 3D visualization"""
+    def _create_3d_plot(self, points, flow_vectors, reference_vec, control_vec, timestamp, output_dir):
+        """Create and save 3D visualization with sceneflow"""
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111, projection='3d')
         
@@ -456,9 +434,29 @@ class SnapshotVisualizationProcessor(Processor):
         ax.zaxis.pane.set_edgecolor('none')
         
         # Plot point cloud
-        if len(point_cloud) > 0:
-            ax.scatter(point_cloud[:, 0], point_cloud[:, 1], point_cloud[:, 2],
+        if len(points) > 0:
+            ax.scatter(points[:, 0], points[:, 1], points[:, 2],
                       c='lightblue', s=5, alpha=0.6, marker='o', edgecolors='none')
+        
+        # Plot flow vectors
+        if len(flow_vectors) > 0:
+            # Subsample flow vectors for clarity if there are too many
+            max_vectors = self.params.get('max_flow_vectors', 50000)
+            if len(flow_vectors) > max_vectors:
+                indices = np.linspace(0, len(flow_vectors)-1, max_vectors, dtype=int)
+                plot_points = points[indices]
+                plot_vectors = flow_vectors[indices]
+            else:
+                plot_points = points
+                plot_vectors = flow_vectors
+            
+            # Scale flow vectors for visibility
+            vector_scale = self.params.get('flow_vector_scale', 1.0)
+            scaled_vectors = plot_vectors * vector_scale
+            
+            ax.quiver(plot_points[:, 0], plot_points[:, 1], plot_points[:, 2],
+                     scaled_vectors[:, 0], scaled_vectors[:, 1], scaled_vectors[:, 2],
+                     color='red', alpha=0.5, linewidth=1.0, arrow_length_ratio=0.01)
         
         # Plot origin (drone position)
         ax.scatter([0], [0], [0], c='red', s=100, marker='o')
@@ -484,7 +482,7 @@ class SnapshotVisualizationProcessor(Processor):
         ax.set_xlabel('X (m)')
         ax.set_ylabel('Y (m)')
         ax.set_zlabel('Z (m)')
-        ax.set_title(f"Time: {timestamp:.2f}s", fontsize=14)
+        ax.set_title(f"Sceneflow at Time: {timestamp:.2f}s", fontsize=14)
         
         # Set view angle
         view_params = self.params.get('view_angle', {'elev': 30, 'azim': 170})
@@ -500,49 +498,47 @@ class SnapshotVisualizationProcessor(Processor):
         # Save plot
         snapshots_dir = output_dir / "snapshots"
         snapshots_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"control_viz_t{timestamp:.2f}".replace('.', '_') + ".pdf"
-        #plt.show()
+        filename = f"sceneflow_viz_t{timestamp:.2f}".replace('.', '_') + ".pdf"
         plt.savefig(snapshots_dir / filename, bbox_inches='tight')
         plt.close(fig)
 
     def process(self, data, input_mappings, output_dir):
         super().process(data, input_mappings, output_dir)
-
-        print(f"Processing snapshot visualization")
         
         # Get required topics
-        pc_topic = input_mappings.get('point_cloud')
+        sceneflow_topic = input_mappings.get('sceneflow')  # Changed from 'point_cloud'
         ref_topic = input_mappings.get('reference')
         ctrl_topic = input_mappings.get('control')
         
-        if not pc_topic or pc_topic not in data:
-            print(f"Warning: Point cloud topic {pc_topic} not found")
+        if not sceneflow_topic or sceneflow_topic not in data:
+            print(f"Warning: Sceneflow topic {sceneflow_topic} not found")
             return
         
         # Process each highlight timestamp
-        pc_highlights = data[pc_topic]['highlights']
-        pc_messages = data[pc_topic]['continuous']
+        sceneflow_highlights = data[sceneflow_topic]['highlights']
+        sceneflow_messages = data[sceneflow_topic]['continuous']
         
-        for idx in pc_highlights:
+        for idx in sceneflow_highlights:
 
-            print(f"Processing point cloud at idx={idx}")
-
-            if idx >= len(pc_messages):
+            if idx >= len(sceneflow_messages):
                 continue
                 
-            pc_msg = pc_messages[idx]
+            sceneflow_msg = sceneflow_messages[idx]
             timestamp = convert_bag_time_in_nanoseconds_to_seconds(
-                data[pc_topic]['bag_start'], 
-                pc_msg.header.stamp.sec + pc_msg.header.stamp.nanosec / 1e9
+                data[sceneflow_topic]['bag_start'], 
+                data[sceneflow_topic]['timestamps'][idx] / 1e9
             )
 
-            print(f"Processing point cloud at t={timestamp:.2f}")
+            print(f"Start time: {data[sceneflow_topic]['bag_start']}", 
+                  f"Timestamp: {sceneflow_msg.header.stamp.sec + sceneflow_msg.header.stamp.nanosec / 1e9}")
+
+            print(f"Processing sceneflow at t={timestamp:.2f}")
             
-            # Extract point cloud
+            # Extract sceneflow data
             try:
-                point_cloud = self._extract_point_cloud(pc_msg)
+                points, flow_vectors = self._extract_sceneflow_data(sceneflow_msg)
             except Exception as e:
-                print(f"Error extracting point cloud at t={timestamp:.2f}: {e}")
+                print(f"Error extracting sceneflow at t={timestamp:.2f}: {e}")
                 continue
             
             # Extract reference vector if available
@@ -562,7 +558,7 @@ class SnapshotVisualizationProcessor(Processor):
                     control_vec = self._extract_control_vector(ctrl_msg)
             
             # Create 3D visualization
-            self._create_3d_plot(point_cloud, reference_vec, control_vec, timestamp, output_dir)
+            self._create_3d_plot(points, flow_vectors, reference_vec, control_vec, timestamp, output_dir)
 
 class ProcessorFactory:
     @staticmethod
@@ -587,8 +583,9 @@ def main(config_path: Path):
     data = extractor.extract()
     
     processors = []
-    for _, proc_cfg in config.processors.items():
+    for name, proc_cfg in config.processors.items():
         if proc_cfg.enabled:
+            print(f"Creating processor: {name}")
             processor = ProcessorFactory.create(proc_cfg.type, proc_cfg.params)
             processors.append((processor, proc_cfg.input_mappings))
     

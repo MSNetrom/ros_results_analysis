@@ -13,7 +13,7 @@ bag_processing:
 processors:
 
   color_image:
-    enabled: false
+    enabled: true
     type: "image"
     input_mappings:
       color_image: "/color_image"
@@ -68,7 +68,7 @@ processors:
     enabled: true
     type: "snapshot_visualization"
     input_mappings:
-      point_cloud: "/depth_point_cloud"
+      sceneflow: "/scene_flow_processed"
       reference: "/input_viz"
       control: "/control_vector_viz_raw"
     params:
@@ -77,5 +77,5 @@ processors:
         y: [-1, 1]
         z: [-1, 1]
       view_angle:
-        elev: 10
+        elev: 0
         azim: 90
