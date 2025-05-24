@@ -105,7 +105,7 @@ processors:
       u_filtered: "/control_vector_viz_raw"
       u_actual: "/mavros/setpoint_raw/local_viz"
     params:
-      sample_interval: 0.1  # Sample every 0.2 seconds
+      sample_interval: 0.2  # Sample every 0.2 seconds
       vector_scale: 0.4     # Scale vectors for visibility
       y_axis_limit: 1.0     # Y-axis range [-1, 1]
       z_axis_limit: 1.0     # Z-axis range [-1, 1]
