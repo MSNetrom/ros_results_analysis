@@ -1,14 +1,14 @@
 # config.yaml
 bag_processing:
   bag_path: "../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag"
-  output_dir: "./results2/straight_on"
+  output_dir: "./results2/wall_slide"
   ros_version: "ROS1"
   max_time_diff: 0.1  # Max allowed time difference in seconds
 
   interval:
-    start: 343
-    end: 346
-    highlights: [343, 344, 345, 346]
+    start: 298
+    end: 301
+    highlights: [298, 299, 300, 301]
 
 processors:
 
@@ -85,7 +85,7 @@ processors:
       filename_prefix: "processed_"
       max_distance: 3.5
       u_scaling_factor: 0.5
-      max_flow_vectors: 400
+      max_flow_vectors: 1000
 
   cbf_value_image:
     enabled: true
