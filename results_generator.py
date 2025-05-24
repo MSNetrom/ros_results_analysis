@@ -235,7 +235,7 @@ class MinCBFPlotProcessor(Processor):
         timestamps = self.get_timestamps_of_message_list(v_0_messages, data[topic_v_0]['bag_start'])
 
         # Make plot from all timestamps in range
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=(12, 4))
         plt.plot(timestamps, v_0_values, label="$v_0$", linewidth=2)
         plt.plot(timestamps, v_1_values, label="$v_1$", linewidth=2)
         plt.legend(fontsize=14)
@@ -246,7 +246,7 @@ class MinCBFPlotProcessor(Processor):
         plt.yticks(fontsize=12)
         plt.grid(True)
 
-        plt.savefig(output_dir / "min_cbf_plot.pdf")
+        plt.savefig(output_dir / "min_cbf_plot.pdf", bbox_inches='tight')
         plt.close()
 
 class USafetyErrorPlotProcessor(Processor):
@@ -275,7 +275,7 @@ class USafetyErrorPlotProcessor(Processor):
         distances_actual = np.linalg.norm(u_safe_values - u_actual_values, axis=1)
 
         # Make plot from all timestamps in range
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=(12, 4))
         plt.plot(timestamps, distances_filtered, label="Filtered", color=COLORS["u_filtered"], linewidth=2)
         plt.plot(timestamps, distances_actual, label="Final (clamped)", color=COLORS["u_actual"], linewidth=2)
         plt.legend(fontsize=14)
@@ -286,7 +286,7 @@ class USafetyErrorPlotProcessor(Processor):
         plt.yticks(fontsize=12)
         plt.grid(True)
 
-        plt.savefig(output_dir / "u_safety_error_plot.pdf")
+        plt.savefig(output_dir / "u_safety_error_plot.pdf", bbox_inches='tight')
         plt.close()
 
 class URefErrorPlotProcessor(USafetyErrorPlotProcessor):
@@ -310,7 +310,7 @@ class URefErrorPlotProcessor(USafetyErrorPlotProcessor):
 
         timestamps = self.get_timestamps_of_message_list(u_ref, data[input_mappings['u_ref']]['bag_start'])
 
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=(12, 4))
         plt.plot(timestamps, distance_safe, label="Safe", color=COLORS["u_safe"], linewidth=2)
         plt.plot(timestamps, distance_filtered, label="Filtered", color=COLORS["u_filtered"], linewidth=2)
         plt.plot(timestamps, distance_actual, label="Final (clamped)", color=COLORS["u_actual"], linewidth=2)
@@ -322,7 +322,7 @@ class URefErrorPlotProcessor(USafetyErrorPlotProcessor):
         plt.yticks(fontsize=12)
         plt.grid(True)
 
-        plt.savefig(output_dir / "u_ref_error_plot.pdf")
+        plt.savefig(output_dir / "u_ref_error_plot.pdf", bbox_inches='tight')
         plt.close()
         
 class USizesPlotProcessor(USafetyErrorPlotProcessor):
@@ -342,7 +342,7 @@ class USizesPlotProcessor(USafetyErrorPlotProcessor):
 
         timestamps = self.get_timestamps_of_message_list(u_ref, data[input_mappings['u_ref']]['bag_start'])
 
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=(12, 4))
         plt.plot(timestamps, u_safe_sizes, label="Safe", color=COLORS["u_safe"], linewidth=2)
         plt.plot(timestamps, u_filtered_sizes, label="Filtered", color=COLORS["u_filtered"], linewidth=2)
         plt.plot(timestamps, u_actual_sizes, label="Final (clamped)", color=COLORS["u_actual"], linewidth=2)
@@ -356,7 +356,7 @@ class USizesPlotProcessor(USafetyErrorPlotProcessor):
         plt.yticks(fontsize=12)
         plt.grid(True)
 
-        plt.savefig(output_dir / "u_sizes_plot.pdf")
+        plt.savefig(output_dir / "u_sizes_plot.pdf", bbox_inches='tight')
         plt.close()
 
 
@@ -387,7 +387,7 @@ class VelocitySizePlotProcessor(Processor):
         timestamps = self.get_timestamps_of_message_list(odometry_messages, data[topic]['bag_start'])
         
         # Create velocity magnitude plot
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=(12, 4))
         plt.plot(timestamps, velocity_sizes, label="Velocity magnitude", linewidth=2)
         plt.legend(fontsize=14)
         plt.xlabel("Time [s]", fontsize=14)
@@ -397,7 +397,7 @@ class VelocitySizePlotProcessor(Processor):
         plt.yticks(fontsize=12)
         plt.grid(True)
         
-        plt.savefig(output_dir / "velocity_size_plot.pdf")
+        plt.savefig(output_dir / "velocity_size_plot.pdf", bbox_inches='tight')
         plt.close()
 
 class SnapshotVisualizationProcessor(Processor):
