@@ -11,6 +11,8 @@ from abc import ABC, abstractmethod
 from rosbags.highlevel import AnyReader
 from rosbags.typesys import Stores, get_typestore
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from mpl_toolkits.mplot3d import Axes3D
 
 
 COLORS = {
@@ -402,7 +404,6 @@ class SnapshotVisualizationProcessor(Processor):
 
     def __init__(self, params: Dict):
         super().__init__(params)
-        from mpl_toolkits.mplot3d import Axes3D
 
     def _extract_sceneflow_data(self, msg):
         """Extract points and flow vectors from sceneflow message"""
@@ -595,6 +596,243 @@ class CBFValueImageProcessor(Processor):
             cv2.imwrite(str(v_1_dir / f"v_1_image_{timestamps[idx]:.2f}.png"), v_1_np)
         
 
+class TimeSeriesVectorVisualizationProcessor(Processor):
+
+    def __init__(self, params: Dict):
+        super().__init__(params)
+
+    def _find_closest_message_index(self, timestamps, target_time_ns, max_diff_ns):
+        """Find the index of the message closest to target time"""
+        if not timestamps:
+            return None
+        
+        # Use bisect to find insertion point
+        idx = bisect.bisect_left(timestamps, target_time_ns)
+        candidates = []
+        
+        if idx > 0:
+            candidates.append((idx-1, abs(timestamps[idx-1] - target_time_ns)))
+        if idx < len(timestamps):
+            candidates.append((idx, abs(timestamps[idx] - target_time_ns)))
+        
+        if not candidates:
+            return None
+            
+        best_idx, diff = min(candidates, key=lambda x: x[1])
+        return best_idx if diff <= max_diff_ns else None
+
+    def _extract_control_vector(self, msg):
+        """Extract control vector from TwistStamped message"""
+        return np.array([msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z])
+
+    def _create_time_series_plot(self, vector_data, output_dir):
+        """Create 3D time-series vector plot"""
+        fig = plt.figure(figsize=(16, 10))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        print("Creating time-series vector plot")
+        
+        # Configure plot appearance
+        ax.xaxis.pane.fill = False
+        ax.yaxis.pane.fill = False
+        ax.zaxis.pane.fill = False
+        ax.xaxis.pane.set_edgecolor('none')
+        ax.yaxis.pane.set_edgecolor('none')
+        ax.zaxis.pane.set_edgecolor('none')
+        ax.grid(False)
+        
+        # Hide the 3D axis lines completely
+        ax.xaxis.line.set_color((1.0, 1.0, 1.0, 0.0))
+        ax.yaxis.line.set_color((1.0, 1.0, 1.0, 0.0))
+        ax.zaxis.line.set_color((1.0, 1.0, 1.0, 0.0))
+        
+        # Get time range
+        times = sorted(vector_data.keys())
+        if not times:
+            return
+            
+        time_start, time_end = min(times), max(times)
+        
+        # Draw time axis
+        ax.plot([time_start, time_end], [0, 0], [0, 0], 'k-', linewidth=3, alpha=0.8)
+        
+        # Add time ticks and labels
+        num_ticks = self.params.get('num_time_ticks', 5)
+        time_ticks = np.linspace(time_start, time_end, num_ticks)
+        
+        for t in time_ticks:
+            # Small vertical line for tick mark
+            ax.plot([t, t], [0, -0.05], [0, 0], 'k-', linewidth=1)
+            # Label below the tick
+            ax.text(t, -0.1, 0, f"{t:.1f}s", color='black', fontsize=10, 
+                   horizontalalignment='center', verticalalignment='top')
+        
+        # Get vector scaling
+        vector_scale = self.params.get('vector_scale', 1.0)
+        print(f"Vector scale: {vector_scale}")
+        
+        # Plot vectors at each time point
+        for time in times:
+            vectors = vector_data[time]
+            
+            # Plot each type of vector if available
+            if 'u_ref' in vectors and vectors['u_ref'] is not None:
+                vector = vectors['u_ref'] * vector_scale
+                if np.linalg.norm(vector) > 0.001:
+                    ax.quiver(time, 0, 0, 0, vector[0], -vector[1],
+                             color=COLORS["u_ref"], linewidth=2, 
+                             arrow_length_ratio=0.15, alpha=0.8)
+            
+            if 'u_safe' in vectors and vectors['u_safe'] is not None:
+                vector = vectors['u_safe'] * vector_scale
+                if np.linalg.norm(vector) > 0.001:
+                    ax.quiver(time, 0, 0, 0, vector[0], vector[1],
+                             color=COLORS["u_safe"], linewidth=2, 
+                             arrow_length_ratio=0.15, alpha=0.8)
+            
+            if 'u_filtered' in vectors and vectors['u_filtered'] is not None:
+                vector = vectors['u_filtered'] * vector_scale
+                if np.linalg.norm(vector) > 0.001:
+                    ax.quiver(time, 0, 0, 0, vector[0], vector[1],
+                             color=COLORS["u_filtered"], linewidth=2, 
+                             arrow_length_ratio=0.15, alpha=0.8)
+            
+            if 'u_actual' in vectors and vectors['u_actual'] is not None:
+                vector = vectors['u_actual'] * vector_scale
+                if np.linalg.norm(vector) > 0.001:
+                    ax.quiver(time, 0, 0, 0, vector[0], vector[1],
+                             color=COLORS["u_actual"], linewidth=2, 
+                             arrow_length_ratio=0.15, alpha=0.8)
+        
+        # Add axis direction indicators (unit vectors)
+        axis_offset = self.params.get('axis_indicator_offset', 0.3)
+        axis_length = self.params.get('axis_indicator_length', 0.2) * vector_scale
+        
+        # Y-axis indicator (pointing in positive Y direction)
+        ax.quiver(time_start - axis_offset, 0, 0, 0, axis_length, 0,
+                 color='gray', linewidth=2, arrow_length_ratio=0.2, alpha=0.7)
+        ax.text(time_start - axis_offset, axis_length + 0.05, 0, 'X', 
+               color='gray', fontsize=12, fontweight='bold',
+               horizontalalignment='center')
+        
+        # Z-axis indicator (pointing in positive Z direction)  
+        ax.quiver(time_start - axis_offset, 0, 0, 0, 0, axis_length,
+                 color='gray', linewidth=2, arrow_length_ratio=0.2, alpha=0.7)
+        ax.text(time_start - axis_offset, 0, axis_length + 0.05, 'Y', 
+               color='gray', fontsize=12, fontweight='bold',
+               horizontalalignment='center')
+        
+        # Create legend
+        legend_elements = []
+        
+        # Check which vectors we actually have data for
+        has_vectors = {'u_ref': False, 'u_safe': False, 'u_filtered': False, 'u_actual': False}
+        for vectors in vector_data.values():
+            for vec_type in has_vectors.keys():
+                if vec_type in vectors and vectors[vec_type] is not None:
+                    has_vectors[vec_type] = True
+        
+        if has_vectors['u_ref']:
+            legend_elements.append(Line2D([0], [0], color=COLORS["u_ref"], lw=2, label='Reference'))
+        if has_vectors['u_safe']:
+            legend_elements.append(Line2D([0], [0], color=COLORS["u_safe"], lw=2, label='Safe'))
+        if has_vectors['u_filtered']:
+            legend_elements.append(Line2D([0], [0], color=COLORS["u_filtered"], lw=2, label='Filtered'))
+        if has_vectors['u_actual']:
+            legend_elements.append(Line2D([0], [0], color=COLORS["u_actual"], lw=2, label='Actual'))
+        
+        if legend_elements:
+            ax.legend(handles=legend_elements, loc='upper right', fontsize=12)
+        
+        # Set axis limits
+        y_lim = self.params.get('y_axis_limit', 0.5)
+        z_lim = self.params.get('z_axis_limit', 0.5)
+        
+        ax.set_xlim(time_start - axis_offset - 0.1, time_end + 0.1)
+        ax.set_ylim(-y_lim, y_lim)
+        ax.set_zlim(-z_lim, z_lim)
+        
+        # Remove all axis labels and ticks
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_zticks([])
+        
+        ax.set_title(f"Control Vectors Over Time (Scale: {vector_scale:.1f})", fontsize=16)
+        
+        # Set view angle
+        view_params = self.params.get('view_angle', {'elev': 20, 'azim': -60})
+        ax.view_init(elev=view_params['elev'], azim=view_params['azim'])
+        
+        plt.tight_layout()
+        
+        # Save plot
+        filename = f"time_series_vectors_{self.params.get('filename_prefix', '')}.pdf"
+        plt.savefig(output_dir / filename, bbox_inches='tight', dpi=300)
+        plt.close(fig)
+
+    def process(self, data, input_mappings, output_dir):
+        super().process(data, input_mappings, output_dir)
+        
+        # Get sample interval
+        sample_interval = self.params.get('sample_interval', 0.2)  # seconds
+        
+        # Get topics
+        u_ref_topic = input_mappings.get('u_ref')
+        u_safe_topic = input_mappings.get('u_safe')
+        u_filtered_topic = input_mappings.get('u_filtered')
+        u_actual_topic = input_mappings.get('u_actual')
+        
+        # We need at least one topic to work with
+        available_topics = {k: v for k, v in {
+            'u_ref': u_ref_topic,
+            'u_safe': u_safe_topic, 
+            'u_filtered': u_filtered_topic,
+            'u_actual': u_actual_topic
+        }.items() if v and v in data}
+        
+        # Use the first available topic to determine time range
+        reference_topic = list(available_topics.values())[0]
+        ref_timestamps = data[reference_topic]['timestamps']
+        ref_bag_start = data[reference_topic]['bag_start']
+        
+        # Convert timestamps to seconds correctly using the existing function
+        start_time_rel = convert_bag_time_in_nanoseconds_to_seconds(ref_bag_start, ref_timestamps[0] / 1e9)
+        end_time_rel = convert_bag_time_in_nanoseconds_to_seconds(ref_bag_start, ref_timestamps[-1] / 1e9)
+        
+        print(f"Time range: {start_time_rel:.2f}s to {end_time_rel:.2f}s")
+        
+        # Generate sample times
+        sample_times = np.arange(start_time_rel, end_time_rel + sample_interval, sample_interval)
+        
+        # Extract vector data at sample times
+        vector_data = {}
+        max_time_diff_ns = int(sample_interval * 0.5 * 1e9)  # Allow half the sample interval as max difference
+        
+        for sample_time in sample_times:
+            # Convert sample time back to nanoseconds using the existing function
+            sample_time_ns = convert_seconds_to_bag_time_in_nanoseconds(ref_bag_start, sample_time)
+            vectors = {}
+            
+            # Extract each type of vector if available
+            for vec_name, topic in available_topics.items():
+                timestamps = data[topic]['timestamps']
+                messages = data[topic]['continuous']
+                
+                idx = self._find_closest_message_index(timestamps, sample_time_ns, max_time_diff_ns)
+                if idx is not None:
+                    vectors[vec_name] = self._extract_control_vector(messages[idx])
+                else:
+                    vectors[vec_name] = None
+            
+            # Only add if we have at least one vector
+            if any(v is not None for v in vectors.values()):
+                vector_data[sample_time] = vectors
+        
+        if vector_data:
+            self._create_time_series_plot(vector_data, output_dir)
+        else:
+            print("No vector data found for time series visualization")
+
 class ProcessorFactory:
     @staticmethod
     def create(processor_type: str, params: Dict) -> Processor:
@@ -607,6 +845,7 @@ class ProcessorFactory:
             "velocity_size_plot": VelocitySizePlotProcessor,
             "snapshot_visualization": SnapshotVisualizationProcessor,
             "cbf_value_image": CBFValueImageProcessor,
+            "time_series_vector_visualization": TimeSeriesVectorVisualizationProcessor,
         }
         return processors[processor_type](params)
 
