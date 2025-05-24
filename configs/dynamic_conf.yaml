@@ -126,7 +126,6 @@ processors:
       y_axis_limit: 1.0     # Y-axis range [-1, 1]
       z_axis_limit: 1.0     # Z-axis range [-1, 1]
       num_time_ticks: 6     # Number of time ticks on axis
-      axis_indicator_offset: 0.3  # Distance of axis indicators from time axis
       axis_indicator_length: 1  # Length of axis direction indicators
       view_angle:
         elev: 20    # Elevation angle

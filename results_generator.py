@@ -663,8 +663,9 @@ class TimeSeriesVectorVisualizationProcessor(Processor):
         for t in time_ticks:
             # Small vertical line for tick mark
             ax.plot([t, t], [0, -0.05], [0, 0], 'k-', linewidth=1)
+
             # Label below the tick
-            ax.text(t, -0.1, 0, f"{t:.1f}s", color='black', fontsize=10, 
+            ax.text(t, -0.1, 0, f"{t-time_start:.2f}s", color='black', fontsize=10, 
                    horizontalalignment='center', verticalalignment='top')
         
         # Get vector scaling
@@ -679,46 +680,53 @@ class TimeSeriesVectorVisualizationProcessor(Processor):
             if 'u_ref' in vectors and vectors['u_ref'] is not None:
                 vector = vectors['u_ref'] * vector_scale
                 if np.linalg.norm(vector) > 0.001:
-                    ax.quiver(time, 0, 0, 0, vector[0], -vector[1],
+                    ax.quiver(time, 0, 0, vector[2], vector[0], vector[1],
                              color=COLORS["u_ref"], linewidth=2, 
                              arrow_length_ratio=0.15, alpha=0.8)
             
             if 'u_safe' in vectors and vectors['u_safe'] is not None:
                 vector = vectors['u_safe'] * vector_scale
                 if np.linalg.norm(vector) > 0.001:
-                    ax.quiver(time, 0, 0, 0, vector[0], vector[1],
+                    ax.quiver(time, 0, 0, vector[2], vector[0], vector[1],
                              color=COLORS["u_safe"], linewidth=2, 
                              arrow_length_ratio=0.15, alpha=0.8)
             
             if 'u_filtered' in vectors and vectors['u_filtered'] is not None:
                 vector = vectors['u_filtered'] * vector_scale
                 if np.linalg.norm(vector) > 0.001:
-                    ax.quiver(time, 0, 0, 0, vector[0], vector[1],
+                    ax.quiver(time, 0, 0, vector[2], vector[0], vector[1],
                              color=COLORS["u_filtered"], linewidth=2, 
                              arrow_length_ratio=0.15, alpha=0.8)
             
             if 'u_actual' in vectors and vectors['u_actual'] is not None:
                 vector = vectors['u_actual'] * vector_scale
                 if np.linalg.norm(vector) > 0.001:
-                    ax.quiver(time, 0, 0, 0, vector[0], vector[1],
+                    ax.quiver(time, 0, 0, vector[2], vector[0], vector[1],
                              color=COLORS["u_actual"], linewidth=2, 
                              arrow_length_ratio=0.15, alpha=0.8)
         
         # Add axis direction indicators (unit vectors)
-        axis_offset = self.params.get('axis_indicator_offset', 0.3)
         axis_length = self.params.get('axis_indicator_length', 0.2) * vector_scale
+        axis_offset = 1.8 * axis_length
         
-        # Y-axis indicator (pointing in positive Y direction)
+        # X-axis indicator (pointing in positive Y direction)
         ax.quiver(time_start - axis_offset, 0, 0, 0, axis_length, 0,
                  color='gray', linewidth=2, arrow_length_ratio=0.2, alpha=0.7)
         ax.text(time_start - axis_offset, axis_length + 0.05, 0, 'X', 
                color='gray', fontsize=12, fontweight='bold',
                horizontalalignment='center')
         
-        # Z-axis indicator (pointing in positive Z direction)  
+        # Y-axis indicator (pointing in positive Z direction)  
         ax.quiver(time_start - axis_offset, 0, 0, 0, 0, axis_length,
                  color='gray', linewidth=2, arrow_length_ratio=0.2, alpha=0.7)
         ax.text(time_start - axis_offset, 0, axis_length + 0.05, 'Y', 
+               color='gray', fontsize=12, fontweight='bold',
+               horizontalalignment='center')
+        
+        # Z-axis indicator (pointing in positive X direction)
+        ax.quiver(time_start - axis_offset, 0, 0, axis_length, 0, 0,
+                 color='gray', linewidth=2, arrow_length_ratio=0.2, alpha=0.7)
+        ax.text(time_start - axis_offset + axis_length + 0.05, 0, 0, 'Z', 
                color='gray', fontsize=12, fontweight='bold',
                horizontalalignment='center')
         
