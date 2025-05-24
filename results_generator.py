@@ -233,11 +233,11 @@ class MinCBFPlotProcessor(Processor):
         timestamps = self.get_timestamps_of_message_list(v_0_messages, data[topic_v_0]['bag_start'])
 
         # Make plot from all timestamps in range
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(12, 6))
         plt.plot(timestamps, v_0_values, label="$v_0$", linewidth=2)
         plt.plot(timestamps, v_1_values, label="$v_1$", linewidth=2)
         plt.legend(fontsize=14)
-        plt.xlabel("Time (seconds)", fontsize=14)
+        plt.xlabel("Time [s]", fontsize=14)
         plt.ylabel("Value", fontsize=14)
         plt.title("Min CBF Plot", fontsize=14)
         plt.xticks(fontsize=12)
@@ -464,25 +464,33 @@ class SnapshotVisualizationProcessor(Processor):
                      color='red', alpha=0.5, linewidth=1.0, arrow_length_ratio=0.01)
         
         # Plot origin (drone position)
-        ax.scatter([0], [0], [0], c='red', s=100, marker='o')
+        ax.scatter([0], [0], [0], c='blue', s=100, marker='o')
+
+        # Get u-scaling factor
+        u_scaling_factor = self.params.get('u_scaling_factor', 1.0)
+
+        u_ref_vec = u_ref_vec * u_scaling_factor
+        u_filtered_vec = u_filtered_vec * u_scaling_factor
+        u_safe_vec = u_safe_vec * u_scaling_factor
+        u_actual_vec = u_actual_vec * u_scaling_factor
 
         if u_ref_vec is not None:
-        # Plot reference vector if available
+            # Plot reference vector if available
             ax.quiver(0, 0, 0, u_ref_vec[0], u_ref_vec[1], u_ref_vec[2],
-                    color=COLORS["u_ref"], linewidth=2, label='Reference', arrow_length_ratio=0.15)
+                    color=COLORS["u_ref"], linewidth=2, label=f'$\| u_{{ref}} \| = {np.linalg.norm(u_ref_vec):.1f} m/s^2$ (Scale: {u_scaling_factor:.1f})', arrow_length_ratio=0.15)
         
         if u_filtered_vec is not None:
             # Plot control vector if available
             ax.quiver(0, 0, 0, u_filtered_vec[0], u_filtered_vec[1], u_filtered_vec[2],
-                color=COLORS["u_filtered"], linewidth=2, label='Filtered', arrow_length_ratio=0.15)
+                color=COLORS["u_filtered"], linewidth=2, label=f'$\| u_{{filtered}} \| = {np.linalg.norm(u_filtered_vec):.1f} m/s^2$ (Scale: {u_scaling_factor:.1f})', arrow_length_ratio=0.15)
         
         if u_safe_vec is not None:
             ax.quiver(0, 0, 0, u_safe_vec[0], u_safe_vec[1], u_safe_vec[2],
-                color=COLORS["u_safe"], linewidth=2, label='Safe', arrow_length_ratio=0.15)
+                color=COLORS["u_safe"], linewidth=2, label=f'$\| u_{{safe}} \| = {np.linalg.norm(u_safe_vec):.1f} m/s^2$ (Scale: {u_scaling_factor:.1f})', arrow_length_ratio=0.15)
         
         if u_actual_vec is not None:
             ax.quiver(0, 0, 0, u_actual_vec[0], u_actual_vec[1], u_actual_vec[2],
-                color=COLORS["u_actual"], linewidth=2, label='Final (clamped)', arrow_length_ratio=0.15)
+                color=COLORS["u_actual"], linewidth=2, label=f'$\| u_{{actual}} \| = {np.linalg.norm(u_actual_vec):.1f} m/s^2$ (Scale: {u_scaling_factor:.1f})', arrow_length_ratio=0.15)
         
         # Set axis limits based on parameters
         limits = self.params.get('axis_limits', {'x': [1, 2.5], 'y': [-1, 1], 'z': [-1, 0.5]})
@@ -492,10 +500,13 @@ class SnapshotVisualizationProcessor(Processor):
         
         # Configure appearance
         ax.set_box_aspect([1, 1, 1])
-        ax.set_xlabel('X (m)')
-        ax.set_ylabel('Y (m)')
-        ax.set_zlabel('Z (m)')
+        ax.set_xlabel('X (m)', fontsize=14)
         ax.set_title(f"Sceneflow at Time: {timestamp:.2f}s", fontsize=14)
+        
+        # Set tick label font sizes
+        ax.tick_params(axis='x', labelsize=12)
+        ax.tick_params(axis='y', labelsize=12)
+        ax.tick_params(axis='z', labelsize=12)
         
         # Set view angle
         view_params = self.params.get('view_angle', {'elev': 0, 'azim': 0, 'roll': 0})
@@ -503,7 +514,8 @@ class SnapshotVisualizationProcessor(Processor):
         
         if u_actual_vec is not None or u_safe_vec is not None or u_filtered_vec is not None or u_ref_vec is not None:
             # Add legend if vectors are present
-            ax.legend(loc='upper right')
+            legend = ax.legend(loc='upper right', bbox_to_anchor=(0.8, 0.8), fontsize=14)
+            legend.set_zorder(1000)  # Ensure legend is in front of everything
         
         plt.tight_layout()
         

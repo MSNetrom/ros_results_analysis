@@ -1,7 +1,7 @@
 # config.yaml
 bag_processing:
   bag_path: "../sceneflow_bags/day4/drone_data_2025-05-22_11-28-10_2025-05-22-11-28-11.bag"
-  output_dir: "./results/dynamic1"
+  output_dir: "./results2/dynamic1"
   ros_version: "ROS1"
   max_time_diff: 0.1  # Max allowed time difference in seconds
 
@@ -75,18 +75,19 @@ processors:
       u_actual: "/mavros/setpoint_raw/local_viz"
     params:
       axis_limits:
-        x: [-1, 2.5]
+        x: [-1.5, 2.5]
         y: [-1, 1]
-        z: [-1, 1]
+        z: [-0.75, 1.25]
       view_angle:
         elev: 0
         azim: 90
         roll: 0
       filename_prefix: "processed_"
       max_distance: 3.5
+      u_scaling_factor: 0.5
 
   snapshot_visualization_raw:
-    enabled: true
+    enabled: false
     type: "snapshot_visualization"
     input_mappings:
       sceneflow: "/scene_flow_raw"
