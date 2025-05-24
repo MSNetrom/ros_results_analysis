@@ -413,16 +413,21 @@ class SnapshotVisualizationProcessor(Processor):
         valid_mask = ~(np.isnan(pts).any(axis=1) | np.isinf(pts).any(axis=1) | 
                       np.isnan(vecs).any(axis=1) | np.isinf(vecs).any(axis=1))
         
+        # Filter out points that are too far away
+        valid_mask = (np.linalg.norm(pts, axis=1) < self.params.get('max_distance', 100)) & valid_mask
+        
         return pts[valid_mask], vecs[valid_mask]
 
     def _extract_control_vector(self, msg):
         """Extract control vector from TwistStamped message"""
         return np.array([msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z])
 
-    def _create_3d_plot(self, points, flow_vectors, reference_vec, control_vec, timestamp, output_dir):
+    def _create_3d_plot(self, points, flow_vectors, u_ref_vec, u_safe_vec, u_filtered_vec, u_actual_vec, timestamp, output_dir, filename_prefix):
         """Create and save 3D visualization with sceneflow"""
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111, projection='3d')
+
+        print("Creating 3D plot")
         
         # Configure plot appearance
         ax.grid(True)
@@ -441,7 +446,7 @@ class SnapshotVisualizationProcessor(Processor):
         # Plot flow vectors
         if len(flow_vectors) > 0:
             # Subsample flow vectors for clarity if there are too many
-            max_vectors = self.params.get('max_flow_vectors', 50000)
+            max_vectors = self.params.get('max_flow_vectors', 5000000)
             if len(flow_vectors) > max_vectors:
                 indices = np.linspace(0, len(flow_vectors)-1, max_vectors, dtype=int)
                 plot_points = points[indices]
@@ -460,16 +465,24 @@ class SnapshotVisualizationProcessor(Processor):
         
         # Plot origin (drone position)
         ax.scatter([0], [0], [0], c='red', s=100, marker='o')
-        
+
+        if u_ref_vec is not None:
         # Plot reference vector if available
-        if reference_vec is not None and np.linalg.norm(reference_vec) > 0:
-            ax.quiver(0, 0, 0, reference_vec[0], reference_vec[1], reference_vec[2],
-                     color='red', linewidth=2, label='Reference', arrow_length_ratio=0.15)
+            ax.quiver(0, 0, 0, u_ref_vec[0], u_ref_vec[1], u_ref_vec[2],
+                    color=COLORS["u_ref"], linewidth=2, label='Reference', arrow_length_ratio=0.15)
         
-        # Plot control vector if available
-        if control_vec is not None and np.linalg.norm(control_vec) > 0:
-            ax.quiver(0, 0, 0, control_vec[0], control_vec[1], control_vec[2],
-                     color='limegreen', linewidth=2, label='Control', arrow_length_ratio=0.15)
+        if u_filtered_vec is not None:
+            # Plot control vector if available
+            ax.quiver(0, 0, 0, u_filtered_vec[0], u_filtered_vec[1], u_filtered_vec[2],
+                color=COLORS["u_filtered"], linewidth=2, label='Filtered', arrow_length_ratio=0.15)
+        
+        if u_safe_vec is not None:
+            ax.quiver(0, 0, 0, u_safe_vec[0], u_safe_vec[1], u_safe_vec[2],
+                color=COLORS["u_safe"], linewidth=2, label='Safe', arrow_length_ratio=0.15)
+        
+        if u_actual_vec is not None:
+            ax.quiver(0, 0, 0, u_actual_vec[0], u_actual_vec[1], u_actual_vec[2],
+                color=COLORS["u_actual"], linewidth=2, label='Final (clamped)', arrow_length_ratio=0.15)
         
         # Set axis limits based on parameters
         limits = self.params.get('axis_limits', {'x': [1, 2.5], 'y': [-1, 1], 'z': [-1, 0.5]})
@@ -485,12 +498,11 @@ class SnapshotVisualizationProcessor(Processor):
         ax.set_title(f"Sceneflow at Time: {timestamp:.2f}s", fontsize=14)
         
         # Set view angle
-        view_params = self.params.get('view_angle', {'elev': 30, 'azim': 170})
-        ax.view_init(elev=view_params['elev'], azim=view_params['azim'])
+        view_params = self.params.get('view_angle', {'elev': 0, 'azim': 0, 'roll': 0})
+        ax.view_init(elev=view_params['elev'], azim=view_params['azim'], roll=view_params['roll'])
         
-        # Add legend if vectors are present
-        if (reference_vec is not None and np.linalg.norm(reference_vec) > 0) or \
-           (control_vec is not None and np.linalg.norm(control_vec) > 0):
+        if u_actual_vec is not None or u_safe_vec is not None or u_filtered_vec is not None or u_ref_vec is not None:
+            # Add legend if vectors are present
             ax.legend(loc='upper right')
         
         plt.tight_layout()
@@ -498,7 +510,7 @@ class SnapshotVisualizationProcessor(Processor):
         # Save plot
         snapshots_dir = output_dir / "snapshots"
         snapshots_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"sceneflow_viz_t{timestamp:.2f}".replace('.', '_') + ".pdf"
+        filename = f"{filename_prefix}sceneflow_viz_t{timestamp:.2f}".replace('.', '_') + ".pdf"
         plt.savefig(snapshots_dir / filename, bbox_inches='tight')
         plt.close(fig)
 
@@ -507,8 +519,10 @@ class SnapshotVisualizationProcessor(Processor):
         
         # Get required topics
         sceneflow_topic = input_mappings.get('sceneflow')  # Changed from 'point_cloud'
-        ref_topic = input_mappings.get('reference')
-        ctrl_topic = input_mappings.get('control')
+        u_ref_topic = input_mappings.get('u_ref', None)
+        u_safe_topic = input_mappings.get('u_safe', None)
+        u_filtered_topic = input_mappings.get('u_filtered', None)
+        u_actual_topic = input_mappings.get('u_actual', None)
         
         if not sceneflow_topic or sceneflow_topic not in data:
             print(f"Warning: Sceneflow topic {sceneflow_topic} not found")
@@ -528,11 +542,6 @@ class SnapshotVisualizationProcessor(Processor):
                 data[sceneflow_topic]['bag_start'], 
                 data[sceneflow_topic]['timestamps'][idx] / 1e9
             )
-
-            print(f"Start time: {data[sceneflow_topic]['bag_start']}", 
-                  f"Timestamp: {sceneflow_msg.header.stamp.sec + sceneflow_msg.header.stamp.nanosec / 1e9}")
-
-            print(f"Processing sceneflow at t={timestamp:.2f}")
             
             # Extract sceneflow data
             try:
@@ -542,23 +551,37 @@ class SnapshotVisualizationProcessor(Processor):
                 continue
             
             # Extract reference vector if available
-            reference_vec = None
-            if ref_topic and ref_topic in data:
-                ref_highlights = data[ref_topic]['highlights']
-                if idx < len(ref_highlights) and ref_highlights[idx] < len(data[ref_topic]['continuous']):
-                    ref_msg = data[ref_topic]['continuous'][ref_highlights[idx]]
-                    reference_vec = self._extract_control_vector(ref_msg)
-            
-            # Extract control vector if available
-            control_vec = None
-            if ctrl_topic and ctrl_topic in data:
-                ctrl_highlights = data[ctrl_topic]['highlights']
-                if idx < len(ctrl_highlights) and ctrl_highlights[idx] < len(data[ctrl_topic]['continuous']):
-                    ctrl_msg = data[ctrl_topic]['continuous'][ctrl_highlights[idx]]
-                    control_vec = self._extract_control_vector(ctrl_msg)
+            u_ref_vec = self._extract_control_vector(data[u_ref_topic]['continuous'][idx]) if u_ref_topic is not None else None
+            u_safe_vec = self._extract_control_vector(data[u_safe_topic]['continuous'][idx]) if u_safe_topic is not None else None
+            u_filtered_vec = self._extract_control_vector(data[u_filtered_topic]['continuous'][idx]) if u_filtered_topic is not None else None
+            u_actual_vec = self._extract_control_vector(data[u_actual_topic]['continuous'][idx]) if u_actual_topic is not None else None
             
             # Create 3D visualization
-            self._create_3d_plot(points, flow_vectors, reference_vec, control_vec, timestamp, output_dir)
+            self._create_3d_plot(points, flow_vectors, u_ref_vec, u_safe_vec, u_filtered_vec, u_actual_vec, 
+                                 timestamp, output_dir, self.params.get('filename_prefix', ''))
+
+
+class CBFValueImageProcessor(Processor):
+
+    def process(self, data, input_mappings, output_dir):
+        super().process(data, input_mappings, output_dir)
+
+        v_0_dir = output_dir / "v_0_images"
+        v_1_dir = output_dir / "v_1_images"
+        v_0_dir.mkdir(parents=True, exist_ok=True)
+        v_1_dir.mkdir(parents=True, exist_ok=True)
+
+        v_0_data = data[input_mappings['v_0']]
+        v_1_data = data[input_mappings['v_1']]
+        timestamps = self.get_timestamps_of_message_list(v_0_data['continuous'], v_0_data['bag_start'])
+
+        for idx in v_0_data['highlights']:
+            v_0_np = np.frombuffer(v_0_data['continuous'][idx].data, dtype=np.uint8).reshape(v_0_data['continuous'][idx].height, v_0_data['continuous'][idx].width, -1)
+            v_1_np = np.frombuffer(v_1_data['continuous'][idx].data, dtype=np.uint8).reshape(v_1_data['continuous'][idx].height, v_1_data['continuous'][idx].width, -1)
+
+            cv2.imwrite(str(v_0_dir / f"v_0_image_{timestamps[idx]:.2f}.png"), v_0_np)
+            cv2.imwrite(str(v_1_dir / f"v_1_image_{timestamps[idx]:.2f}.png"), v_1_np)
+        
 
 class ProcessorFactory:
     @staticmethod
@@ -571,6 +594,7 @@ class ProcessorFactory:
             "u_sizes_plot": USizesPlotProcessor,
             "velocity_size_plot": VelocitySizePlotProcessor,
             "snapshot_visualization": SnapshotVisualizationProcessor,
+            "cbf_value_image": CBFValueImageProcessor,
         }
         return processors[processor_type](params)
 

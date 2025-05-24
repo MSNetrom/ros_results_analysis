@@ -1,14 +1,14 @@
 # config.yaml
 bag_processing:
-  bag_path: "../sceneflow_bags/day4/drone_data_2025-05-22_11-28-10_2025-05-22-11-28-11.bag"
-  output_dir: "./results/dynamic1"
+  bag_path: "../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag"
+  output_dir: "./results/straight_on"
   ros_version: "ROS1"
   max_time_diff: 0.1  # Max allowed time difference in seconds
 
   interval:
-    start: 72
-    end: 74
-    highlights: [72, 72.5, 72.75, 73, 73.25, 73.5, 73.75, 74]
+    start: 343
+    end: 347
+    highlights: [343, 344, 345, 346, 347]
 
 processors:
 
@@ -22,7 +22,7 @@ processors:
 
 
   min_cbf_plot:
-    enabled: true
+    enabled: false
     type: "min_cbf_plot"
     input_mappings:
       v_0: "/raw_psi_image"
@@ -30,7 +30,7 @@ processors:
 
 
   u_safety_error_plot:
-    enabled: true
+    enabled: false
     type: "u_safety_error_plot"
     input_mappings:
       #u_ref: "/input_viz"
@@ -40,7 +40,7 @@ processors:
 
 
   u_ref_error_plot:
-    enabled: true
+    enabled: false
     type: "u_ref_error_plot"
     input_mappings:
       u_ref: "/input_viz"
@@ -50,7 +50,7 @@ processors:
 
 
   u_sizes_plot:
-    enabled: true
+    enabled: false
     type: "u_sizes_plot"
     input_mappings:
       u_ref: "/input_viz"
@@ -59,7 +59,7 @@ processors:
       u_actual: "/mavros/setpoint_raw/local_viz"
 
   velocity_size_plot:
-    enabled: true
+    enabled: false
     type: "velocity_size_plot"
     input_mappings:
       odometry: "/rig_node/odometry"
@@ -69,10 +69,8 @@ processors:
     type: "snapshot_visualization"
     input_mappings:
       sceneflow: "/scene_flow_processed"
-      u_ref: "/input_viz"
-      u_safe: "/control_vector_viz_unfiltered"
-      u_filtered: "/control_vector_viz_raw"
-      u_actual: "/mavros/setpoint_raw/local_viz"
+      reference: "/input_viz"
+      control: "/control_vector_viz_raw"
     params:
       axis_limits:
         x: [-1, 2.5]
@@ -81,32 +79,4 @@ processors:
       view_angle:
         elev: 0
         azim: 90
-        roll: 0
-      filename_prefix: "processed_"
-      max_distance: 3.5
-
-  snapshot_visualization_raw:
-    enabled: true
-    type: "snapshot_visualization"
-    input_mappings:
-      sceneflow: "/scene_flow_raw"
-    params:
-      axis_limits:
-        x: [-1, 1]
-        y: [-1, 1]
-        z: [-1, 2.5]
-      view_angle:
-        elev: 0
-        azim: 180
-        roll: 90
-      filename_prefix: "raw_"
-      max_distance: 3.5
-
-  cbf_value_image:
-    enabled: true
-    type: "cbf_value_image"
-    input_mappings:
-      v_0: '/psi_image'
-      v_1: '/h_image'
-    params:
-      filename_prefix: "cbf_value_"
+      max_flow_vectors: 5000
