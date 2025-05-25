@@ -1,0 +1,118 @@
+# config.yaml
+bag_processing:
+  bag_path: "../sceneflow_bags/day4/drone_data_2025-05-22_11-13-58_2025-05-22-11-13-59.bag"
+  output_dir: "./results2/field_of_view"
+  ros_version: "ROS1"
+  max_time_diff: 0.1  # Max allowed time difference in seconds
+
+  interval:
+    start: 217
+    end: 220.1
+    highlights: [217, 218, 219, 220]
+
+processors:
+
+  color_image:
+    enabled: true
+    type: "image"
+    input_mappings:
+      color_image: "/color_image"
+    params:
+      filename_prefix: "color_image_"
+
+
+  min_cbf_plot:
+    enabled: true
+    type: "min_cbf_plot"
+    input_mappings:
+      v_0: "/raw_psi_image"
+      v_1: "/raw_h_image"
+
+
+  u_safety_error_plot:
+    enabled: true
+    type: "u_safety_error_plot"
+    input_mappings:
+      #u_ref: "/input_viz"
+      u_safe: "/control_vector_viz_unfiltered"
+      u_filtered: "/control_vector_viz_raw"
+      u_actual: "/mavros/setpoint_raw/local_viz"
+
+
+  u_ref_error_plot:
+    enabled: true
+    type: "u_ref_error_plot"
+    input_mappings:
+      u_ref: "/input_viz"
+      u_safe: "/control_vector_viz_unfiltered"
+      u_filtered: "/control_vector_viz_raw"
+      u_actual: "/mavros/setpoint_raw/local_viz"
+
+
+  u_sizes_plot:
+    enabled: true
+    type: "u_sizes_plot"
+    input_mappings:
+      u_ref: "/input_viz"
+      u_safe: "/control_vector_viz_unfiltered"
+      u_filtered: "/control_vector_viz_raw"
+      u_actual: "/mavros/setpoint_raw/local_viz"
+
+  velocity_size_plot:
+    enabled: true
+    type: "velocity_size_plot"
+    input_mappings:
+      odometry: "/rig_node/odometry"
+
+  snapshot_visualization:
+    enabled: true
+    type: "snapshot_visualization"
+    input_mappings:
+      sceneflow: "/scene_flow_processed"
+      u_ref: "/input_viz"
+      u_safe: "/control_vector_viz_unfiltered"
+      u_filtered: "/control_vector_viz_raw"
+      u_actual: "/mavros/setpoint_raw/local_viz"
+    params:
+      axis_limits:
+        x: [-1.5, 2.5]
+        y: [-1, 1]
+        z: [-0.75, 1.25]
+      view_angle:
+        elev: 0
+        azim: 90
+        roll: 0
+      filename_prefix: "processed_"
+      max_distance: 3.5
+      u_scaling_factor: 0.5
+      max_flow_vectors: 1000
+
+  cbf_value_image:
+    enabled: true
+    type: "cbf_value_image"
+    input_mappings:
+      v_0: '/psi_image'
+      v_1: '/h_image'
+    params:
+      filename_prefix: "cbf_value_"
+
+  time_series_vectors:
+    enabled: true
+    type: "time_series_vector_visualization"
+    input_mappings:
+      u_ref: "/input_viz"
+      u_safe: "/control_vector_viz_unfiltered"
+      u_filtered: "/control_vector_viz_raw"
+      u_actual: "/mavros/setpoint_raw/local_viz"
+    params:
+      sample_interval: 0.4  # Sample every 0.2 seconds
+      vector_scale: 0.4     # Scale vectors for visibility
+      y_axis_limit: 1.0     # Y-axis range [-1, 1]
+      z_axis_limit: 1.0     # Z-axis range [-1, 1]
+      num_time_ticks: 6     # Number of time ticks on axis
+      axis_indicator_length: 1  # Length of axis direction indicators
+      legend_height: 0.68
+      view_angle:
+        elev: 20    # Elevation angle
+        azim: -60   # Azimuth angle
+      filename_prefix: "control_vectors"
