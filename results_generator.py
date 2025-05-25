@@ -750,8 +750,9 @@ class TimeSeriesVectorVisualizationProcessor(Processor):
             legend_elements.append(Line2D([0], [0], color=COLORS["u_actual"], lw=2, label='Actual'))
         
         if legend_elements:
+            legend_height = self.params.get('legend_height', 0.65)
             ax.legend(handles=legend_elements, loc='upper right', 
-                      bbox_to_anchor=(0.8, 0.65),
+                      bbox_to_anchor=(0.8, legend_height),
                       fontsize=12)
         
         # Set axis limits
