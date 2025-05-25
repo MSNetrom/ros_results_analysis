@@ -751,8 +751,9 @@ class TimeSeriesVectorVisualizationProcessor(Processor):
         
         if legend_elements:
             legend_height = self.params.get('legend_height', 0.65)
+            legend_width = self.params.get('legend_width', 0.8)
             ax.legend(handles=legend_elements, loc='upper right', 
-                      bbox_to_anchor=(0.8, legend_height),
+                      bbox_to_anchor=(legend_width, legend_height),
                       fontsize=12)
         
         # Set axis limits

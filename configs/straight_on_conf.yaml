@@ -112,6 +112,7 @@ processors:
       num_time_ticks: 6     # Number of time ticks on axis
       axis_indicator_length: 1  # Length of axis direction indicators
       legend_height: 0.68
+      legend_width: 0.85
       view_angle:
         elev: 20    # Elevation angle
         azim: -60   # Azimuth angle
