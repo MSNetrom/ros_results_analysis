@@ -236,8 +236,8 @@ class MinCBFPlotProcessor(Processor):
 
         # Make plot from all timestamps in range
         plt.figure(figsize=(12, 4))
-        plt.plot(timestamps, v_0_values, label="$v_0$", linewidth=2)
-        plt.plot(timestamps, v_1_values, label="$v_1$", linewidth=2)
+        plt.plot(timestamps, v_0_values, label="$\psi_{min}$", linewidth=2)
+        plt.plot(timestamps, v_1_values, label="$h_{min}$", linewidth=2)
         plt.legend(fontsize=14)
         plt.xlabel("Time [s]", fontsize=14)
         plt.ylabel("Value", fontsize=14)
