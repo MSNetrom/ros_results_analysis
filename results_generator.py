@@ -400,6 +400,46 @@ class VelocitySizePlotProcessor(Processor):
         plt.savefig(output_dir / "velocity_size_plot.pdf", bbox_inches='tight')
         plt.close()
 
+class AngularVelocitySizePlotProcessor(Processor):
+
+    def process(self, data, input_mappings, output_dir):
+        super().process(data, input_mappings, output_dir)
+
+        topic = input_mappings.get('odometry')
+        
+        if not topic or topic not in data:
+            return
+        
+        odometry_messages = data[topic]['continuous']
+        
+        # Extract angular velocity values from odometry messages
+        angular_velocity_values = []
+        for msg in odometry_messages:
+            angular_vel = [msg.twist.twist.angular.x, msg.twist.twist.angular.y, msg.twist.twist.angular.z]
+            angular_velocity_values.append(angular_vel)
+        
+        angular_velocity_values = np.array(angular_velocity_values)
+        
+        # Calculate angular velocity magnitudes (sizes)
+        angular_velocity_sizes = np.linalg.norm(angular_velocity_values, axis=1)
+        
+        # Get timestamps relative to start
+        timestamps = self.get_timestamps_of_message_list(odometry_messages, data[topic]['bag_start'])
+        
+        # Create angular velocity magnitude plot
+        plt.figure(figsize=(12, 4))
+        plt.plot(timestamps, angular_velocity_sizes, label="Angular velocity magnitude", linewidth=2)
+        plt.legend(fontsize=14)
+        plt.xlabel("Time [s]", fontsize=14)
+        plt.ylabel("Angular velocity [rad/s]", fontsize=14)
+        plt.title("Robot angular velocity magnitude over time", fontsize=14)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.grid(True)
+        
+        plt.savefig(output_dir / "angular_velocity_size_plot.pdf", bbox_inches='tight')
+        plt.close()
+
 class SnapshotVisualizationProcessor(Processor):
 
     def __init__(self, params: Dict):
@@ -858,6 +898,7 @@ class ProcessorFactory:
             "snapshot_visualization": SnapshotVisualizationProcessor,
             "cbf_value_image": CBFValueImageProcessor,
             "time_series_vector_visualization": TimeSeriesVectorVisualizationProcessor,
+            "angular_velocity_size_plot": AngularVelocitySizePlotProcessor,
         }
         return processors[processor_type](params)
 

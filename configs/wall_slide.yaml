@@ -80,7 +80,7 @@ processors:
         z: [-0.75, 1.25]
       view_angle:
         elev: 0
-        azim: 90
+        azim: 100
         roll: 0
       filename_prefix: "processed_"
       max_distance: 3.5
