@@ -116,3 +116,10 @@ processors:
         elev: 20    # Elevation angle
         azim: -60   # Azimuth angle
       filename_prefix: "control_vectors"
+
+  angular_velocity_plot:
+    enabled: true
+    type: "angular_velocity_size_plot"
+    input_mappings:
+      odometry: "/rig_node/odometry"
+    params:
