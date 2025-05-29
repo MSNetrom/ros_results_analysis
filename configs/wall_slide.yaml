@@ -27,6 +27,8 @@ processors:
     input_mappings:
       v_0: "/raw_psi_image"
       v_1: "/raw_h_image"
+    params:
+      k: 30.0
 
 
   u_safety_error_plot:

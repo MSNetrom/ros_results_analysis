@@ -13,7 +13,13 @@ from rosbags.typesys import Stores, get_typestore
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d import Axes3D
+import scipy as sp
 
+
+def softmin(x: np.ndarray, k: float = 1.0):
+    ins = - k * x
+    logsumexp_val = sp.special.logsumexp(ins)
+    return - logsumexp_val / k
 
 COLORS = {
     "u_safe": "green",
@@ -217,6 +223,9 @@ class MinCBFPlotProcessor(Processor):
         # Convert image messages to numpy arrays and extract scalar values
         v_0_values = []
         v_1_values = []
+
+        softmin_v_1_values = []
+        k = self.params.get('k', 1.0)
         
         for msg in v_0_messages:
             float_img = np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
@@ -228,6 +237,7 @@ class MinCBFPlotProcessor(Processor):
         for msg in v_1_messages:
             float_img = np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
             # Extract scalar value from image (modify this based on your needs)
+            softmin_v_1_values.append(softmin(float_img, k))
             scalar_value = np.min(float_img)  # or np.mean(img), img[0,0], etc.
             v_1_values.append(scalar_value)
 
@@ -238,6 +248,7 @@ class MinCBFPlotProcessor(Processor):
         plt.figure(figsize=(12, 4))
         plt.plot(timestamps, v_0_values, label="$\psi_{min}$", linewidth=2)
         plt.plot(timestamps, v_1_values, label="$h_{min}$", linewidth=2)
+        plt.plot(timestamps, softmin_v_1_values, label="$\phi=softmin(h_1, \ldots, h_n)$", linewidth=2)
         plt.legend(fontsize=14)
         plt.xlabel("Time [s]", fontsize=14)
         plt.ylabel("Value", fontsize=14)
