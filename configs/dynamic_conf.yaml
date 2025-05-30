@@ -136,9 +136,9 @@ processors:
       max_points_per_cloud: 8000
       cmap: viridis
       axis_limits:
-        x: [1.5, 3]  # X-axis limits in meters
-        y: [-2.5, 2.5]    # Y-axis limits in meters  
-        z: [-0.8, 0.5]    # Z-axis limits in meters
+        x: [0.5, 3.5]  # X-axis limits in meters
+        y: [1.5, 2.5]    # Y-axis limits in meters  
+        z: [-1.2, 0.8]    # Z-axis limits in meters
       sample_every_n     : 5
       distance_threshold : 4
       point_size         : 15
