@@ -364,21 +364,75 @@ class MinCBFPlotProcessor(Processor):
         # Make timestamps relative to start of interval
         timestamps = self.get_timestamps_of_message_list(v_0_messages, data[topic_v_0]['bag_start'])
 
-        # Make plot from all timestamps in range
+        # ──────────────────────────────────────────────────────────────────────
+        # 1)  Save the static full-range PDF (unchanged behaviour)
+        # ──────────────────────────────────────────────────────────────────────
         plt.figure(figsize=(12, 4))
         plt.plot(timestamps, v_0_values, label="$\psi_{min}$", linewidth=2)
-        plt.plot(timestamps, v_1_values, label="$h_{min}$", linewidth=2)
-        plt.plot(timestamps, softmin_v_1_values, label="$\phi=softmin(h_1, \ldots, h_n)$", linewidth=2)
+        plt.plot(timestamps, v_1_values, label="$h_{min}$",  linewidth=2)
+        plt.plot(timestamps, softmin_v_1_values,
+                 label="$\phi=softmin(h_1, \\ldots, h_n)$", linewidth=2)
         plt.legend(fontsize=14)
         plt.xlabel("Time [s]", fontsize=14)
-        plt.ylabel("Value", fontsize=14)
+        plt.ylabel("Value",     fontsize=14)
         plt.title("Min CBF Plot", fontsize=14)
-        plt.xticks(fontsize=12)
-        plt.yticks(fontsize=12)
-        plt.grid(True)
-
-        plt.savefig(output_dir / "min_cbf_plot.pdf", bbox_inches='tight')
+        plt.xticks(fontsize=12); plt.yticks(fontsize=12); plt.grid(True)
+        static_pdf = output_dir / "min_cbf_plot.pdf"
+        plt.savefig(static_pdf, bbox_inches='tight')
         plt.close()
+
+        # ──────────────────────────────────────────────────────────────────────
+        # 2)  Optional video creation with vertical marker
+        # ──────────────────────────────────────────────────────────────────────
+        if not self.params.get("generate_video", False):
+            return
+
+        fps           = float(self.params.get("video_fps", 10.0))
+        video_name    = self.params.get("video_filename", "min_cbf_plot_video.mp4")
+        video_path    = output_dir / video_name
+
+        # ── pre-create figure & constant lines (no re-plotting) ───────────────
+        fig, ax = plt.subplots(figsize=(12, 4))
+        l1, = ax.plot(timestamps, v_0_values, label="$\psi_{min}$", linewidth=2)
+        l2, = ax.plot(timestamps, v_1_values, label="$h_{min}$",  linewidth=2)
+        l3, = ax.plot(timestamps, softmin_v_1_values,
+                      label="$\phi$", linewidth=2)
+        ax.set_xlabel("Time [s]", fontsize=14)
+        ax.set_ylabel("Value",     fontsize=14)
+        ax.set_title("Min CBF Plot", fontsize=14)
+        ax.grid(True); ax.legend(fontsize=14)
+        ax.tick_params(labelsize=12)
+
+        # we will only update the x-position of this vertical line
+        marker = ax.axvline(x=timestamps[0], color='red', linewidth=1.5)
+
+        timed_frames, tmp_files = [], []
+        start_t = timestamps[0]
+
+        for t in timestamps:
+            marker.set_xdata([t, t])
+            fig.canvas.draw_idle()
+
+            # save current frame to a temporary png
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            fig.savefig(tmp.name, dpi=200, bbox_inches='tight')
+            tmp_files.append(tmp)
+            timed_frames.append((Path(tmp.name), t - start_t))
+
+        plt.close(fig)
+
+        # ── stitch the pngs into a video ──────────────────────────────────────
+        VideoCreatorUtil.create_video_from_timed_images(
+            image_frames_with_times = timed_frames,
+            output_video_path       = video_path,
+            fps                     = fps,
+            duration_sec            = timed_frames[-1][1] - timed_frames[0][1],
+            logger                  = print
+        )
+
+        # clean-up tmp files
+        for f in tmp_files:
+            f.close()
 
 class USafetyErrorPlotProcessor(Processor):
 

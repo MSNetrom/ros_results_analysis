@@ -32,6 +32,9 @@ processors:
       v_1: "/raw_h_image"
     params:
       k: 30.0
+      generate_video: true            # Enable video
+      video_filename: "min_cbf_plot_video.mp4"
+      video_fps: 30
 
 
   u_safety_error_plot:
