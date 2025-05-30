@@ -6,14 +6,14 @@ bag_processing:
   max_time_diff: 0.1  # Max allowed time difference in seconds
 
   interval:
-    start: 72
-    end: 74
-    highlights: [71.5]
+    start: 71
+    end: 75
+    highlights: [73]
 
 processors:
 
   color_image:
-    enabled: true
+    enabled: false
     type: "image"
     input_mappings:
       color_image: "/color_image"
@@ -25,7 +25,7 @@ processors:
 
 
   min_cbf_plot:
-    enabled: true
+    enabled: false
     type: "min_cbf_plot"
     input_mappings:
       v_0: "/raw_psi_image"
@@ -38,7 +38,7 @@ processors:
 
 
   u_safety_error_plot:
-    enabled: true
+    enabled: false
     type: "u_safety_error_plot"
     input_mappings:
       #u_ref: "/input_viz"
@@ -48,7 +48,7 @@ processors:
 
 
   u_ref_error_plot:
-    enabled: true
+    enabled: false
     type: "u_ref_error_plot"
     input_mappings:
       u_ref: "/input_viz"
@@ -58,7 +58,7 @@ processors:
 
 
   u_sizes_plot:
-    enabled: true
+    enabled: false
     type: "u_sizes_plot"
     input_mappings:
       u_ref: "/input_viz"
@@ -67,7 +67,7 @@ processors:
       u_actual: "/mavros/setpoint_raw/local_viz"
 
   velocity_size_plot:
-    enabled: true
+    enabled: false
     type: "velocity_size_plot"
     input_mappings:
       odometry: "/rig_node/odometry"
@@ -115,7 +115,7 @@ processors:
       max_distance: 3.5
 
   cbf_value_image:
-    enabled: true
+    enabled: false
     type: "cbf_value_image"
     input_mappings:
       v_0: '/psi_image'
@@ -125,6 +125,27 @@ processors:
       generate_video: true            # Enable video
       video_filename: "cbf_value_video.mp4"
       video_fps: 30
+
+
+  pc_path:
+    enabled: true
+    type: pointcloud_path_visualization
+    params:
+      sample_every_n:       5          # use every 5-th cloud
+      max_time_diff:        0.05       # s, cloud ↔ odom sync tolerance
+      max_points_per_cloud: 8000
+      cmap: viridis
+      axis_limits:
+        x: [1.5, 3]  # X-axis limits in meters
+        y: [-2.5, 2.5]    # Y-axis limits in meters  
+        z: [-1, 1]    # Z-axis limits in meters
+      view_angle:
+        elev: 10      # Elevation angle (degrees)
+        azim: -70     # Azimuth angle (degrees)
+    input_mappings:
+      point_cloud: /depth_point_cloud
+      odometry:    /rig_node/odometry
+
 
   time_series_vectors:
     enabled: true

@@ -16,6 +16,17 @@ from mpl_toolkits.mplot3d import Axes3D
 import scipy as sp
 import os # Added for path operations in video creation
 import tempfile
+from scipy.spatial.transform import Rotation as R
+# ------------------------------------------------------------------
+#  PointCloud-helper import (ROS 2 ▸ ROS 1 ▸ fallback)
+# ------------------------------------------------------------------
+try:                                # ROS 2
+    from sensor_msgs_py import point_cloud2 as pc2
+except ImportError:
+    try:                            # ROS 1
+        from sensor_msgs import point_cloud2 as pc2
+    except ImportError:             # no helper available
+        pc2 = None
 
 class VideoCreatorUtil:
     @staticmethod
@@ -913,23 +924,27 @@ class TimeSeriesVectorVisualizationProcessor(Processor):
     def __init__(self, params: Dict):
         super().__init__(params)
 
-    def _find_closest_message_index(self, timestamps, target_time_ns, max_diff_ns):
-        """Find the index of the message closest to target time"""
-        if not timestamps:
+    def _find_closest_message_index(self,
+                                    timestamps,
+                                    target_time_ns,
+                                    max_diff_ns):
+        """Return index of the message closest to target_time_ns (or None)."""
+        if not timestamps:                         # empty list
             return None
-        
-        # Use bisect to find insertion point
+
         idx = bisect.bisect_left(timestamps, target_time_ns)
         candidates = []
-        
+
         if idx > 0:
-            candidates.append((idx-1, abs(timestamps[idx-1] - target_time_ns)))
+            candidates.append((idx - 1,
+                               abs(timestamps[idx - 1] - target_time_ns)))
         if idx < len(timestamps):
-            candidates.append((idx, abs(timestamps[idx] - target_time_ns)))
-        
+            candidates.append((idx,
+                               abs(timestamps[idx]     - target_time_ns)))  # <- fixed
+
         if not candidates:
             return None
-            
+
         best_idx, diff = min(candidates, key=lambda x: x[1])
         return best_idx if diff <= max_diff_ns else None
 
@@ -1157,6 +1172,211 @@ class TimeSeriesVectorVisualizationProcessor(Processor):
         else:
             print("No vector data found for time series visualization")
 
+class PointCloudPathVisualizationProcessor(Processor):
+    """
+    Build one aggregated point-cloud in the fixed frame and draw the
+    vehicle trajectory through it.
+    
+    params supported in YAML:
+    --------------------------------------------------------------
+    sample_every_n          : take every n-th PointCloud2 message  (default 10)
+    max_time_diff           : s, cloud ↔ odom time tolerance       (default 0.05)
+    max_points_per_cloud    : int, random down-sample each cloud   (default 5000)
+    cmap                    : any matplotlib colormap              (default 'viridis')
+    """
+    def __init__(self, params: Dict):
+        super().__init__(params)
+        if pc2 is None:
+            raise ImportError(
+                "Package `sensor_msgs_py` required. "
+                "Install with `pip install sensor_msgs_py`."
+            )
+
+    # ---------- helpers -------------------------------------------------
+    def _find_closest_msg(self,
+                          stamps: List[int],            # nanoseconds
+                          target: int,
+                          max_diff_ns: int) -> Union[int, None]:
+        """index of msg with time closest to target (None if too far)"""
+        idx = bisect.bisect_left(stamps, target)
+        cand = []
+        if idx > 0:
+            cand.append((idx-1, abs(stamps[idx-1] - target)))
+        if idx < len(stamps):
+            cand.append((idx,   abs(stamps[idx]   - target)))
+        if not cand:
+            return None
+        best, diff = min(cand, key=lambda x: x[1])
+        return best if diff <= max_diff_ns else None
+
+    def _pose_from_odom(self, odom_msg):
+        p = np.array([odom_msg.pose.pose.position.x,
+                      odom_msg.pose.pose.position.y,
+                      odom_msg.pose.pose.position.z])
+        q = np.array([odom_msg.pose.pose.orientation.x,
+                      odom_msg.pose.pose.orientation.y,
+                      odom_msg.pose.pose.orientation.z,
+                      odom_msg.pose.pose.orientation.w])
+        R_bl_in_odom = R.from_quat(q)          # base_link  →  odom
+        return p, R_bl_in_odom
+
+    def _xyz_from_cloud(self, pc_msg) -> np.ndarray:
+        """
+        Return an (N,3) array with xyz coordinates of valid points.
+        Works with:
+          • sensor_msgs[_py].point_cloud2 helper (ROS-runtime messages)
+          • pure-NumPy fallback (messages read with rosbags)
+        """
+        # --- try helper first ------------------------------------------
+        if pc2 is not None:
+            try:
+                return np.asarray(list(
+                    pc2.read_points(pc_msg,
+                                    field_names=('x', 'y', 'z'),
+                                    skip_nans=True)),
+                    dtype=np.float32)
+            except (AssertionError, AttributeError, TypeError):
+                # not a roslib message → silently drop to fallback
+                pass
+
+        # ---------- pure-NumPy fallback --------------------------------
+        # Assumes that x, y, z are the first three float32 fields,
+        # which is true for Velodyne, Realsense, Ouster, …
+        if pc_msg.point_step % 4:          # not multiple of float32 bytes
+            raise ValueError("Unsupported PointCloud2 layout "
+                             "(cannot decode without helper library).")
+
+        n_pts   = len(pc_msg.data) // pc_msg.point_step
+        floats  = np.frombuffer(pc_msg.data, dtype=np.float32)
+
+        # correct endianness
+        if pc_msg.is_bigendian:
+            floats = floats.byteswap()
+
+        floats  = floats.reshape(n_pts, pc_msg.point_step // 4)
+        xyz     = floats[:, :3]            # first three floats → x,y,z
+
+        # remove NaN / Inf rows
+        mask = np.isfinite(xyz).all(axis=1)
+        return xyz[mask]
+
+    # ---------- processing ---------------------------------------------
+    def process(self,
+                data: Dict[str, Any],
+                input_mappings: Dict[str, str],
+                output_dir: Path):
+        super().process(data, input_mappings, output_dir)
+
+        pc_topic   = input_mappings.get('point_cloud')
+        odo_topic  = input_mappings.get('odometry')
+
+        if pc_topic not in data or odo_topic not in data:
+            print("[PointCloudPath] topic missing – nothing done.")
+            return
+
+        pc_msgs   = data[pc_topic]['continuous']
+        pc_stamps = data[pc_topic]['timestamps']              # ns
+
+        odom_msgs   = data[odo_topic]['continuous']
+        odom_stamps = data[odo_topic]['timestamps']
+
+        # --------------- parameters -----------------
+        every_n        = int(self.params.get('sample_every_n',       10))
+        max_dt_ns      = int(self.params.get('max_time_diff', 0.05) * 1e9)
+        max_pts_cloud  = int(self.params.get('max_points_per_cloud', 5000))
+        cmap_name      = self.params.get('cmap', 'viridis')
+        
+        # Add axis limit parameters
+        axis_limits    = self.params.get('axis_limits', None)  # {'x': [-5, 5], 'y': [-5, 5], 'z': [-2, 2]}
+        view_angle     = self.params.get('view_angle', None)   # {'elev': 20, 'azim': -60}
+
+        agg_points     = []       # all transformed xyz points
+        path_positions = []       # vehicle position for each cloud (odom frame)
+
+        for i in range(0, len(pc_msgs), every_n):
+            pc_msg   = pc_msgs[i]
+            pc_stamp = pc_stamps[i]
+
+            # -- match odometry pose ------------------------------------
+            j = self._find_closest_msg(odom_stamps, pc_stamp, max_dt_ns)
+            if j is None:
+                continue
+            p_odom, R_odom = self._pose_from_odom(odom_msgs[j])
+            path_positions.append(p_odom)
+
+            # -- read xyz from PointCloud2 ------------------------------
+            xyz = self._xyz_from_cloud(pc_msg)
+            if xyz.size == 0:
+                continue
+            # down-sample each cloud (uniform random)
+            if xyz.shape[0] > max_pts_cloud:
+                idx_sel = np.random.choice(xyz.shape[0], max_pts_cloud, replace=False)
+                xyz = xyz[idx_sel]
+
+            # -- transform to odom frame --------------------------------
+            xyz_odom = R_odom.apply(xyz) + p_odom
+            agg_points.append(xyz_odom)
+
+        if not agg_points:
+            print("[PointCloudPath] no valid data collected.")
+            return
+
+        agg_points     = np.concatenate(agg_points, axis=0)
+        path_positions = np.vstack(path_positions)
+
+        # --------------- plot ------------------------------------------
+        fig = plt.figure(figsize=(10, 8))
+        ax  = fig.add_subplot(111, projection='3d')
+
+        # point-cloud (light grey)
+        ax.scatter(agg_points[:, 0],
+                   agg_points[:, 1],
+                   agg_points[:, 2],
+                   s=1, c='lightgrey', alpha=0.4)
+
+        # path – colour by flight time
+        t_rel = np.linspace(0.0, 1.0, len(path_positions))
+        path_sc = ax.scatter(path_positions[:, 0],
+                             path_positions[:, 1],
+                             path_positions[:, 2],
+                             c=t_rel, cmap=cmap_name, s=15)
+        ax.plot(path_positions[:, 0],
+                path_positions[:, 1],
+                path_positions[:, 2],
+                color='red', linewidth=2, alpha=0.8)
+
+        cb = fig.colorbar(path_sc, ax=ax, fraction=0.03, pad=0.07)
+        cb.set_label("relative time", fontsize=12)
+
+        # Set axis limits if specified
+        if axis_limits:
+            if 'x' in axis_limits:
+                ax.set_xlim(axis_limits['x'])
+            if 'y' in axis_limits:
+                ax.set_ylim(axis_limits['y'])
+            if 'z' in axis_limits:
+                ax.set_zlim(axis_limits['z'])
+
+        # Set view angle if specified
+        if view_angle:
+            elev = view_angle.get('elev', None)
+            azim = view_angle.get('azim', None)
+            ax.view_init(elev=elev, azim=azim)
+
+        ax.set_title("Quadrotor trajectory through aggregated point-cloud",
+                     fontsize=14)
+        ax.set_xlabel("X [m]"); ax.set_ylabel("Y [m]"); ax.set_zlabel("Z [m]")
+        ax.set_box_aspect([1, 1, 1])
+        ax.grid(False)
+
+        plt.tight_layout()
+        fig_path = output_dir / "pointcloud_path_viz.pdf"
+        plt.show()
+        plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+        print(f"[PointCloudPath] saved {fig_path}")
+
 class ProcessorFactory:
     @staticmethod
     def create(processor_type: str, params: Dict) -> Processor:
@@ -1171,6 +1391,7 @@ class ProcessorFactory:
             "cbf_value_image": CBFValueImageProcessor,
             "time_series_vector_visualization": TimeSeriesVectorVisualizationProcessor,
             "angular_velocity_size_plot": AngularVelocitySizePlotProcessor,
+            "pointcloud_path_visualization": PointCloudPathVisualizationProcessor,
         }
         return processors[processor_type](params)
 
