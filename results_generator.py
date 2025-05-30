@@ -381,6 +381,11 @@ class MinCBFPlotProcessor(Processor):
         # Make timestamps relative to start of interval
         timestamps = self.get_timestamps_of_message_list(v_0_messages, data[topic_v_0]['bag_start'])
 
+        # Convert to numpy arrays for easier manipulation
+        v_0_values = np.array(v_0_values)
+        v_1_values = np.array(v_1_values)
+        softmin_v_1_values = np.array(softmin_v_1_values)
+
         # ──────────────────────────────────────────────────────────────────────
         # 1)  Save the static full-range PDF (unchanged behaviour)
         # ──────────────────────────────────────────────────────────────────────
@@ -389,6 +394,15 @@ class MinCBFPlotProcessor(Processor):
         plt.plot(timestamps, v_1_values, label="$h_{min}$",  linewidth=2)
         plt.plot(timestamps, softmin_v_1_values,
                  label="$\phi=softmin(h_1, \\ldots, h_n)$", linewidth=2)
+        
+        # Add fill for negative portions
+        fill_alpha = self.params.get('negative_fill_alpha', 0.3)
+        plt.fill_between(timestamps, v_0_values, 0, where=(v_0_values < 0), 
+                        color='green', alpha=fill_alpha, interpolate=True)
+        plt.fill_between(timestamps, v_1_values, 0, where=(v_1_values < 0), 
+                        color='blue', alpha=fill_alpha, interpolate=True)
+        plt.fill_between(timestamps, softmin_v_1_values, 0, where=(softmin_v_1_values < 0), 
+                        color='orange', alpha=fill_alpha, interpolate=True)
         
         # Make markers for the highlights, and set the label to the alphabet
         for i, idx in enumerate(data[topic_v_0]['highlights']):
@@ -420,6 +434,15 @@ class MinCBFPlotProcessor(Processor):
         l2, = ax.plot(timestamps, v_1_values, label="$h_{min}$",  linewidth=2)
         l3, = ax.plot(timestamps, softmin_v_1_values,
                       label="$\phi=softmin(h_1, \\ldots, h_n)$", linewidth=2)
+        
+        # Add fill for negative portions (same as static plot)
+        ax.fill_between(timestamps, v_0_values, 0, where=(v_0_values < 0), 
+                       color='green', alpha=fill_alpha, interpolate=True)
+        ax.fill_between(timestamps, v_1_values, 0, where=(v_1_values < 0), 
+                       color='blue', alpha=fill_alpha, interpolate=True)
+        ax.fill_between(timestamps, softmin_v_1_values, 0, where=(softmin_v_1_values < 0), 
+                       color='orange', alpha=fill_alpha, interpolate=True)
+        
         ax.set_xlabel("Time [s]", fontsize=14)
         ax.set_ylabel("Value",     fontsize=14)
         ax.set_title("Min CBF Plot", fontsize=14)
