@@ -1338,6 +1338,7 @@ class PointCloudPathVisualizationProcessor(Processor):
             if xyz.shape[0] > max_pts_cloud:
                 xyz = xyz[np.random.choice(xyz.shape[0],
                                            max_pts_cloud, replace=False)]
+                
             xyz_odom = R_odom.apply(xyz) + p_odom          # → odom frame
 
             # ---- distance filter (optional) -------------------------
@@ -1425,9 +1426,10 @@ class PointCloudPathVisualizationProcessor(Processor):
 
         # Colorabr for point cloud
         # Point cloud colorbar (only if not constant coloring)
+        point_cmap_padding = self.params.get('point_cmap_padding', -0.2)
         if point_color_by != 'constant':
             cb_points = fig.colorbar(points_scatter, ax=ax, 
-                                     fraction=0.04, pad=-0.2, 
+                                     fraction=0.04, pad=point_cmap_padding, 
                                      location='top')
             
             if point_color_by == 'time':
@@ -1446,14 +1448,13 @@ class PointCloudPathVisualizationProcessor(Processor):
             ax.view_init(elev=view_angle.get('elev', None),
                          azim=view_angle.get('azim', None))
 
-        ax.set_title("Quadrotor trajectory through aggregated point-cloud",
-                     fontsize=14)
+        #ax.set_title("Quadrotor trajectory through aggregated point-cloud",
+        #             fontsize=14)
         ax.set_xlabel("X [m]"); ax.set_ylabel("Y [m]"); ax.set_zlabel("Z [m]")
         ax.set_box_aspect([1, 1, 1]); ax.grid(False)
         plt.tight_layout()
 
         fig_path = output_dir / "pointcloud_path_viz.pdf"
-        plt.show()
         plt.savefig(fig_path)
         plt.close(fig)
         print(f"[PointCloudPath] saved {fig_path}")

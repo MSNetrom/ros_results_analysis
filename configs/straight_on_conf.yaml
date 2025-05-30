@@ -7,13 +7,13 @@ bag_processing:
 
   interval:
     start: 343
-    end: 346
+    end: 346.5
     highlights: [343, 344, 345, 346]
 
 processors:
 
   color_image:
-    enabled: false
+    enabled: true
     type: "image"
     input_mappings:
       color_image: "/color_image"
@@ -136,17 +136,18 @@ processors:
       max_points_per_cloud: 8000
       cmap: viridis
       axis_limits:
-        x: [2, 4.0]  # X-axis limits in meters
-        y: [-4.0, 7.0]    # Y-axis limits in meters  
-        z: [1.0, 4.0]    # Z-axis limits in meters
+        x: [1.0, 4.0]  # X-axis limits in meters
+        y: [-0.5, 1.5]    # Y-axis limits in meters  
+        z: [2.0, 4.5]    # Z-axis limits in meters
       sample_every_n     : 5
       distance_threshold : 5
       point_size         : 15
       point_color_by     : time        # or 'distance', 'constant'
       point_cmap         : winter
+      point_cmap_padding : -0.05
       path_linewidth     : 5.0         # thicker line
       cmap               : inferno     # for CBF correction
-      view_angle         : {elev: 15, azim: 50}
+      view_angle         : {elev: 20, azim: 90}
     input_mappings:
       point_cloud: /depth_point_cloud
       odometry:    /rig_node/odometry
