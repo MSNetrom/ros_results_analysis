@@ -6,8 +6,8 @@ bag_processing:
   max_time_diff: 0.1  # Max allowed time difference in seconds
 
   interval:
-    start: 71
-    end: 75
+    start: 72
+    end: 74.5
     highlights: [73]
 
 processors:
@@ -138,14 +138,15 @@ processors:
       axis_limits:
         x: [1.5, 3]  # X-axis limits in meters
         y: [-2.5, 2.5]    # Y-axis limits in meters  
-        z: [-1, 1]    # Z-axis limits in meters
-      view_angle:
-        sample_every_n     : 5
-        point_size         : 18          # bigger “balls”
-        distance_threshold : 6.0         # metres
-        cmap               : plasma
-        axis_limits        : {x: [-5,5], y: [-5,5], z: [-2,2]}
-        view_angle         : {elev: 25, azim: -70}
+        z: [-0.8, 0.5]    # Z-axis limits in meters
+      sample_every_n     : 5
+      distance_threshold : 4
+      point_size         : 15
+      point_color_by     : time        # or 'distance', 'constant'
+      point_cmap         : winter
+      path_linewidth     : 5.0         # thicker line
+      cmap               : inferno     # for CBF correction
+      view_angle         : {elev: 15, azim: 105}
     input_mappings:
       point_cloud: /depth_point_cloud
       odometry:    /rig_node/odometry

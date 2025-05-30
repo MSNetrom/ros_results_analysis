@@ -1182,12 +1182,15 @@ class PointCloudPathVisualizationProcessor(Processor):
 
     params supported in YAML
     -------------------------------------------------------------------
-    sample_every_n       : use every n-th PointCloud2                 (10)
-    max_time_diff        : s, tolerance cloud ↔ odom            (0.05)
-    max_points_per_cloud : random down-sample each cloud             (5000)
-    cmap                 : matplotlib colormap for path colouring ('viridis')
-    point_size           : scatter size of cloud points                 (8)
-    distance_threshold   : m, keep only points within radius (None = off)
+    sample_every_n       : use every n-th PointCloud2                   (10)
+    max_time_diff        : s, tolerance cloud ↔ odom / u_*              (0.05)
+    max_points_per_cloud : random down-sample each cloud               (5000)
+    distance_threshold   : m, keep only points within radius (None=off)
+    point_size           : scatter size of cloud points                   (8)
+    point_color_by       : 'time' | 'distance' | 'constant'          ('constant')
+    point_cmap           : matplotlib cmap for points               ('viridis')
+    path_linewidth       : width of trajectory line                      (3.0)
+    cmap                 : colormap for colouring CBF correction    ('viridis')
     axis_limits          : dict, e.g. {'x':[-5,5], 'y':[-5,5], 'z':[-2,2]}
     view_angle           : dict, e.g. {'elev':20, 'azim':-60}
     """
@@ -1298,18 +1301,22 @@ class PointCloudPathVisualizationProcessor(Processor):
             u_safe_stamps= data[u_safe_topic]['timestamps']
 
         # --------------- parameters ----------------------------------
-        every_n        = int(self.params.get('sample_every_n',       10))
+        every_n        = int(self.params.get('sample_every_n',          10))
         max_dt_ns      = int(self.params.get('max_time_diff', 0.05) * 1e9)
         max_pts_cloud  = int(self.params.get('max_points_per_cloud', 5000))
-        cmap_name      = self.params.get('cmap',            'viridis')
-        point_size     = int(self.params.get('point_size',           8))
-        dist_thresh    = self.params.get('distance_threshold',    None)
-        axis_limits    = self.params.get('axis_limits',           None)
-        view_angle     = self.params.get('view_angle',            None)
+        dist_thresh    = self.params.get('distance_threshold',       None)
+
+        # visual appearance
+        point_size     = int(self.params.get('point_size',               8))
+        point_color_by = str(self.params.get('point_color_by',
+                                         'constant')).strip().lower()
+        point_cmap     =      self.params.get('point_cmap',       'viridis')
+        path_lw        = float(self.params.get('path_linewidth',        3.0))
+        cmap_name      =      self.params.get('cmap',             'viridis')
 
         # --------------- aggregate point-cloud -----------------------
-        agg_points     = []
-        path_pos_cloud = []          # pose for each *used* cloud
+        agg_points, agg_colours = [], []          # arrays collected here
+        path_pos_cloud = []
         for i in range(0, len(pc_msgs), every_n):
             pc_msg, pc_stamp = pc_msgs[i], pc_stamps[i]
 
@@ -1317,6 +1324,8 @@ class PointCloudPathVisualizationProcessor(Processor):
             j = self._find_closest_msg(odom_stamps, pc_stamp, max_dt_ns)
             if j is None:
                 continue
+
+
             p_odom, R_odom = self._pose_from_odom(odom_msgs[j])
             path_pos_cloud.append(p_odom)
 
@@ -1324,6 +1333,8 @@ class PointCloudPathVisualizationProcessor(Processor):
             xyz = self._xyz_from_cloud(pc_msg)
             if xyz.size == 0:
                 continue
+
+
             if xyz.shape[0] > max_pts_cloud:
                 xyz = xyz[np.random.choice(xyz.shape[0],
                                            max_pts_cloud, replace=False)]
@@ -1333,14 +1344,27 @@ class PointCloudPathVisualizationProcessor(Processor):
             if dist_thresh is not None:
                 mask = np.linalg.norm(xyz_odom, axis=1) <= dist_thresh
                 xyz_odom = xyz_odom[mask]
-            if xyz_odom.size:
-                agg_points.append(xyz_odom)
+            if not xyz_odom.size:
+                continue
 
-        if not agg_points:
+            # ---- colour per point -----------------------------------
+            if point_color_by == 'time':
+                # Convert to elapsed seconds from first timestamp
+                t_seconds = (pc_stamp - pc_stamps[0]) / 1e9
+                agg_colours.append(np.full(xyz_odom.shape[0], t_seconds, dtype=float))
+            elif point_color_by == 'distance':
+                agg_colours.append(np.linalg.norm(xyz_odom, axis=1))
+            else:                                      # 'constant'
+                agg_colours.append(np.zeros(xyz_odom.shape[0]))
+
+            agg_points.append(xyz_odom)
+
+        if len(agg_points) == 0:                   # <=  more robust check
             print("[PointCloudPath] no valid data collected.")
             return
 
-        agg_points     = np.concatenate(agg_points, axis=0)
+        agg_points  = np.concatenate(agg_points,  axis=0)
+        agg_colours = np.concatenate(agg_colours, axis=0)
         path_pos_cloud = np.vstack(path_pos_cloud)
 
         # --------------- full path & CBF correction ------------------
@@ -1379,28 +1403,45 @@ class PointCloudPathVisualizationProcessor(Processor):
         fig = plt.figure(figsize=(10, 8))
         ax  = fig.add_subplot(111, projection='3d')
 
-        # --- aggregated cloud ---------------------------------------
-        ax.scatter(agg_points[:, 0], agg_points[:, 1], agg_points[:, 2],
-                   s=point_size, c='lightgrey', alpha=0.4)
+        # transparent panes (remove grey background)
+        for pane in (ax.xaxis.pane, ax.yaxis.pane, ax.zaxis.pane):
+            pane.set_facecolor((1.0, 1.0, 1.0, 0.0))
 
-        # --- colourised path ----------------------------------------
-        # build line segments
+        # --- aggregated cloud ---------------------------------------
+        points_scatter = ax.scatter(agg_points[:, 0], agg_points[:, 1], agg_points[:, 2],
+                   s=point_size, c=agg_colours, cmap=point_cmap, alpha=0.9)
+
+        # --- colourised path ---------------------------------------
         segments = np.stack([path_all[:-1], path_all[1:]], axis=1)
         norm     = Normalize(vmin=np.min(corr_vals), vmax=np.max(corr_vals))
         lc       = Line3DCollection(segments, cmap=cmap_name, norm=norm,
-                                    linewidths=2)
-        lc.set_array(corr_vals[1:])      # colour by correction
+                                    linewidths=path_lw)        # ← uses param
+        lc.set_array(corr_vals[1:])
         ax.add_collection(lc)
 
         # colourbar ---------------------------------------------------
-        cb = fig.colorbar(lc, ax=ax, fraction=0.03, pad=0.07)
-        cb.set_label("‖u_safe − u_ref‖  [$m/s^2$]", fontsize=12)
+        cb = fig.colorbar(lc, ax=ax, fraction=0.03, pad=-0.2)
+        cb.set_label("$\|u_{safe} - u_{ref}\|$ [$m/s^2$]", fontsize=12)
+
+        # Colorabr for point cloud
+        # Point cloud colorbar (only if not constant coloring)
+        if point_color_by != 'constant':
+            cb_points = fig.colorbar(points_scatter, ax=ax, 
+                                     fraction=0.04, pad=-0.2, 
+                                     location='top')
+            
+            if point_color_by == 'time':
+                cb_points.set_label("Time [s]", fontsize=12)
+            elif point_color_by == 'distance':
+                cb_points.set_label("Distance from quadrotor [m]", fontsize=12)
 
         # optional axis limits / view
+        axis_limits = self.params.get('axis_limits', None)
         if axis_limits:
             ax.set_xlim(axis_limits.get('x', ax.get_xlim()))
             ax.set_ylim(axis_limits.get('y', ax.get_ylim()))
             ax.set_zlim(axis_limits.get('z', ax.get_zlim()))
+        view_angle = self.params.get('view_angle', None)
         if view_angle:
             ax.view_init(elev=view_angle.get('elev', None),
                          azim=view_angle.get('azim', None))
@@ -1412,7 +1453,8 @@ class PointCloudPathVisualizationProcessor(Processor):
         plt.tight_layout()
 
         fig_path = output_dir / "pointcloud_path_viz.pdf"
-        plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+        plt.show()
+        plt.savefig(fig_path)
         plt.close(fig)
         print(f"[PointCloudPath] saved {fig_path}")
 
