@@ -277,19 +277,20 @@ class ImageProcessor(Processor):
             timestamp_ns = source_timestamps_ns[i]
             time_in_s_absolute = (timestamp_ns - source_messages_first_timestamp_ns) / 1e9
 
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-            temp_file_path = Path(temp_file.name)
-            temp_files.append(temp_file)
-
             filename = f"{self.params.get('filename_prefix', 'img_')}{time_in_s_absolute:.3f}.png" # Use more precision for unique names
 
             # Check if we are in the highlights
             if i in data[topic]['highlights']:
                 self._save_image(msg, image_output_dir / filename)
 
-            saved_path = self._save_image(msg, temp_file_path)
-            if saved_path:
-                timed_image_frames.append((saved_path, time_in_s_absolute))
+            if self.params.get("generate_video", False):
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                temp_file_path = Path(temp_file.name)
+                temp_files.append(temp_file)
+
+                saved_path = self._save_image(msg, temp_file_path)
+                if saved_path:
+                    timed_image_frames.append((saved_path, time_in_s_absolute))
             if (i + 1) % 100 == 0: # Log progress
                  print(f"ImageProcessor: Saved {i+1}/{len(source_messages)} frames for video...")
 
@@ -648,12 +649,13 @@ class SnapshotVisualizationProcessor(Processor):
         """Extract control vector from TwistStamped message"""
         return np.array([msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z])
 
-    def _create_3d_plot(self, points, flow_vectors, u_ref_vec, u_safe_vec, u_filtered_vec, u_actual_vec, timestamp, output_dir, filename_prefix):
+    def _create_3d_plot(self, points, flow_vectors, u_ref_vec, 
+                        u_safe_vec, u_filtered_vec, u_actual_vec, 
+                        timestamp, output_path):
+        
         """Create and save 3D visualization with sceneflow"""
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111, projection='3d')
-
-        print("Creating 3D plot")
         
         # Configure plot appearance
         ax.grid(True)
@@ -746,10 +748,10 @@ class SnapshotVisualizationProcessor(Processor):
         plt.tight_layout()
         
         # Save plot
-        snapshots_dir = output_dir / "snapshots"
-        snapshots_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{filename_prefix}sceneflow_viz_t{timestamp:.2f}".replace('.', '_') + ".pdf"
-        plt.savefig(snapshots_dir / filename, bbox_inches='tight')
+        #snapshots_dir = output_dir / "snapshots"
+        #snapshots_dir.mkdir(parents=True, exist_ok=True)
+        #filename = f"{filename_prefix}sceneflow_viz_t{timestamp:.2f}".replace('.', '_') + ".pdf"
+        plt.savefig(output_path, bbox_inches='tight')
         plt.close(fig)
 
     def process(self, data, input_mappings, output_dir):
@@ -769,17 +771,28 @@ class SnapshotVisualizationProcessor(Processor):
         # Process each highlight timestamp
         sceneflow_highlights = data[sceneflow_topic]['highlights']
         sceneflow_messages = data[sceneflow_topic]['continuous']
-        
-        for idx in sceneflow_highlights:
 
-            if idx >= len(sceneflow_messages):
-                continue
+        indexes = range(len(sceneflow_messages)) if self.params.get("generate_video", False) else sceneflow_highlights
+        #timestamps = self.get_timestamps_of_message_list(sceneflow_messages, data[sceneflow_topic]['bag_start'])
+
+        temp_files = []
+        timestamp_start = convert_bag_time_in_nanoseconds_to_seconds(
+            data[sceneflow_topic]['bag_start'], 
+            data[sceneflow_topic]['timestamps'][0] / 1e9
+        )
+
+        # Save paths and timestamps
+        timed_image_frames = []
+        
+        for idx in indexes:
+
+            print(f"Sceneflow message {idx} of {len(indexes)}")
                 
             sceneflow_msg = sceneflow_messages[idx]
             timestamp = convert_bag_time_in_nanoseconds_to_seconds(
                 data[sceneflow_topic]['bag_start'], 
                 data[sceneflow_topic]['timestamps'][idx] / 1e9
-            )
+            ) - timestamp_start
             
             # Extract sceneflow data
             try:
@@ -795,8 +808,35 @@ class SnapshotVisualizationProcessor(Processor):
             u_actual_vec = self._extract_control_vector(data[u_actual_topic]['continuous'][idx]) if u_actual_topic is not None else None
             
             # Create 3D visualization
-            self._create_3d_plot(points, flow_vectors, u_ref_vec, u_safe_vec, u_filtered_vec, u_actual_vec, 
-                                 timestamp, output_dir, self.params.get('filename_prefix', ''))
+            if idx in sceneflow_highlights:
+                filename = f"{self.params.get('filename_prefix', 'sceneflow_viz_t')}{timestamp:.2f}.pdf"
+                output_path = output_dir / filename
+                self._create_3d_plot(points, flow_vectors, u_ref_vec, u_safe_vec, u_filtered_vec, u_actual_vec, 
+                                 timestamp, output_path)
+                
+            if self.params.get("generate_video", False):
+            
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                temp_file_path = Path(temp_file.name)
+                temp_files.append(temp_file)
+                timed_image_frames.append((temp_file_path, timestamp))
+
+                self._create_3d_plot(points, flow_vectors, u_ref_vec, u_safe_vec, u_filtered_vec, u_actual_vec, 
+                                    timestamp, temp_file_path)
+
+        if self.params.get("generate_video", False):
+            fps        = float(self.params.get("video_fps", 1.0))
+            video_name = self.params.get("video_filename", "snapshot_viz_video.mp4")
+            VideoCreatorUtil.create_video_from_timed_images(
+                image_frames_with_times = timed_image_frames,
+                output_video_path       = output_dir / video_name,
+                fps                     = fps,
+                duration_sec            = timed_image_frames[-1][1] - timed_image_frames[0][1],
+                logger                  = print
+            )
+
+        for f in temp_files:
+            f.close()
 
 
 class CBFValueImageProcessor(Processor):
