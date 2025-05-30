@@ -853,13 +853,60 @@ class CBFValueImageProcessor(Processor):
         v_1_data = data[input_mappings['v_1']]
         timestamps = self.get_timestamps_of_message_list(v_0_data['continuous'], v_0_data['bag_start'])
 
-        for idx in v_0_data['highlights']:
+        indexes = range(len(v_0_data['continuous'])) if self.params.get("generate_video", False) else v_0_data['highlights']
+        temp_files = []
+        timed_image_frames_0 = []
+        timed_image_frames_1 = []
+
+        for idx in indexes:
+
+
             v_0_np = np.frombuffer(v_0_data['continuous'][idx].data, dtype=np.uint8).reshape(v_0_data['continuous'][idx].height, v_0_data['continuous'][idx].width, -1)
             v_1_np = np.frombuffer(v_1_data['continuous'][idx].data, dtype=np.uint8).reshape(v_1_data['continuous'][idx].height, v_1_data['continuous'][idx].width, -1)
 
-            cv2.imwrite(str(v_0_dir / f"v_0_image_{timestamps[idx]:.2f}.png"), v_0_np)
-            cv2.imwrite(str(v_1_dir / f"v_1_image_{timestamps[idx]:.2f}.png"), v_1_np)
+            if idx in v_0_data['highlights']:
+                cv2.imwrite(str(v_0_dir / f"v_0_image_{timestamps[idx]:.2f}.png"), v_0_np)
+                cv2.imwrite(str(v_1_dir / f"v_1_image_{timestamps[idx]:.2f}.png"), v_1_np)
+
+            if self.params.get("generate_video", False):
+                temp_file_0 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                temp_file_1 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                temp_file_path_0 = Path(temp_file_0.name)
+                temp_file_path_1 = Path(temp_file_1.name)
+
+                temp_files.append(temp_file_0)
+                temp_files.append(temp_file_1)
+                timed_image_frames_0.append((temp_file_path_0, timestamps[idx]))
+                timed_image_frames_1.append((temp_file_path_1, timestamps[idx]))
+
+                cv2.imwrite(str(temp_file_path_0), v_0_np)
+                cv2.imwrite(str(temp_file_path_1), v_1_np)
         
+        if self.params.get("generate_video", False):
+            fps        = float(self.params.get("video_fps", 1.0))
+            video_name = self.params.get("video_filename", "snapshot_viz_video.mp4")
+
+            video_name_0 = "0_" + video_name
+            video_name_1 = "1_" + video_name
+
+            VideoCreatorUtil.create_video_from_timed_images(
+                image_frames_with_times = timed_image_frames_0,
+                output_video_path       = output_dir / video_name_0,
+                fps                     = fps,
+                duration_sec            = timed_image_frames_0[-1][1] - timed_image_frames_0[0][1],
+                logger                  = print
+            )
+
+            VideoCreatorUtil.create_video_from_timed_images(
+                image_frames_with_times = timed_image_frames_1,
+                output_video_path       = output_dir / video_name_1,
+                fps                     = fps,
+                duration_sec            = timed_image_frames_1[-1][1] - timed_image_frames_1[0][1],
+                logger                  = print
+            )
+
+        for f in temp_files:
+            f.close()
 
 class TimeSeriesVectorVisualizationProcessor(Processor):
 
