@@ -8,7 +8,7 @@ bag_processing:
   interval:
     start: 72
     end: 74.5
-    highlights: [73]
+    highlights: [73, 74]
 
 processors:
 
@@ -25,7 +25,7 @@ processors:
 
 
   min_cbf_plot:
-    enabled: false
+    enabled: true
     type: "min_cbf_plot"
     input_mappings:
       v_0: "/raw_psi_image"
@@ -128,7 +128,7 @@ processors:
 
 
   pc_path:
-    enabled: true
+    enabled: false
     type: pointcloud_path_visualization
     params:
       sample_every_n:       5          # use every 5-th cloud
@@ -155,7 +155,7 @@ processors:
       
 
   time_series_vectors:
-    enabled: true
+    enabled: false
     type: "time_series_vector_visualization"
     input_mappings:
       u_ref: "/input_viz"
@@ -175,7 +175,7 @@ processors:
       filename_prefix: "control_vectors"
 
   angular_velocity_plot:
-    enabled: true
+    enabled: false
     type: "angular_velocity_size_plot"
     input_mappings:
       odometry: "/rig_node/odometry"

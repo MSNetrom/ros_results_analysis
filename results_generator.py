@@ -31,6 +31,8 @@ except ImportError:
 from mpl_toolkits.mplot3d.art3d import Line3DCollection     #  NEW
 from matplotlib.colors import Normalize                    #  NEW
 
+alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
 class VideoCreatorUtil:
     @staticmethod
     def create_video_from_timed_images(
@@ -387,10 +389,16 @@ class MinCBFPlotProcessor(Processor):
         plt.plot(timestamps, v_1_values, label="$h_{min}$",  linewidth=2)
         plt.plot(timestamps, softmin_v_1_values,
                  label="$\phi=softmin(h_1, \\ldots, h_n)$", linewidth=2)
+        
+        # Make markers for the highlights, and set the label to the alphabet
+        for i, idx in enumerate(data[topic_v_0]['highlights']):
+            plt.axvline(x=timestamps[idx], color='red', linewidth=1.5)
+            plt.text(timestamps[idx], plt.ylim()[1]*1.01, alphabet[i], fontsize=14, ha='center', va='bottom')
+
         plt.legend(fontsize=14)
         plt.xlabel("Time [s]", fontsize=14)
         plt.ylabel("Value",     fontsize=14)
-        plt.title("Min CBF Plot", fontsize=14)
+        plt.title(" ", fontsize=14)
         plt.xticks(fontsize=12); plt.yticks(fontsize=12); plt.grid(True)
         static_pdf = output_dir / "min_cbf_plot.pdf"
         plt.savefig(static_pdf, bbox_inches='tight')
@@ -411,7 +419,7 @@ class MinCBFPlotProcessor(Processor):
         l1, = ax.plot(timestamps, v_0_values, label="$\psi_{min}$", linewidth=2)
         l2, = ax.plot(timestamps, v_1_values, label="$h_{min}$",  linewidth=2)
         l3, = ax.plot(timestamps, softmin_v_1_values,
-                      label="$\phi$", linewidth=2)
+                      label="$\phi=softmin(h_1, \\ldots, h_n)$", linewidth=2)
         ax.set_xlabel("Time [s]", fontsize=14)
         ax.set_ylabel("Value",     fontsize=14)
         ax.set_title("Min CBF Plot", fontsize=14)
