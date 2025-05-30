@@ -28,6 +28,9 @@ except ImportError:
     except ImportError:             # no helper available
         pc2 = None
 
+from mpl_toolkits.mplot3d.art3d import Line3DCollection     #  NEW
+from matplotlib.colors import Normalize                    #  NEW
+
 class VideoCreatorUtil:
     @staticmethod
     def create_video_from_timed_images(
@@ -1176,13 +1179,17 @@ class PointCloudPathVisualizationProcessor(Processor):
     """
     Build one aggregated point-cloud in the fixed frame and draw the
     vehicle trajectory through it.
-    
-    params supported in YAML:
-    --------------------------------------------------------------
-    sample_every_n          : take every n-th PointCloud2 message  (default 10)
-    max_time_diff           : s, cloud ↔ odom time tolerance       (default 0.05)
-    max_points_per_cloud    : int, random down-sample each cloud   (default 5000)
-    cmap                    : any matplotlib colormap              (default 'viridis')
+
+    params supported in YAML
+    -------------------------------------------------------------------
+    sample_every_n       : use every n-th PointCloud2                 (10)
+    max_time_diff        : s, tolerance cloud ↔ odom            (0.05)
+    max_points_per_cloud : random down-sample each cloud             (5000)
+    cmap                 : matplotlib colormap for path colouring ('viridis')
+    point_size           : scatter size of cloud points                 (8)
+    distance_threshold   : m, keep only points within radius (None = off)
+    axis_limits          : dict, e.g. {'x':[-5,5], 'y':[-5,5], 'z':[-2,2]}
+    view_angle           : dict, e.g. {'elev':20, 'azim':-60}
     """
     def __init__(self, params: Dict):
         super().__init__(params)
@@ -1260,121 +1267,153 @@ class PointCloudPathVisualizationProcessor(Processor):
         mask = np.isfinite(xyz).all(axis=1)
         return xyz[mask]
 
-    # ---------- processing ---------------------------------------------
+    # ---------- processing -------------------------------------------------
     def process(self,
                 data: Dict[str, Any],
                 input_mappings: Dict[str, str],
                 output_dir: Path):
+
         super().process(data, input_mappings, output_dir)
 
         pc_topic   = input_mappings.get('point_cloud')
         odo_topic  = input_mappings.get('odometry')
+        u_ref_topic  = input_mappings.get('u_ref')     #  NEW (optional)
+        u_safe_topic = input_mappings.get('u_safe')    #  NEW (optional)
 
         if pc_topic not in data or odo_topic not in data:
             print("[PointCloudPath] topic missing – nothing done.")
             return
 
-        pc_msgs   = data[pc_topic]['continuous']
-        pc_stamps = data[pc_topic]['timestamps']              # ns
+        pc_msgs      = data[pc_topic]['continuous']
+        pc_stamps    = data[pc_topic]['timestamps']          # ns
+        odom_msgs    = data[odo_topic]['continuous']
+        odom_stamps  = data[odo_topic]['timestamps']
 
-        odom_msgs   = data[odo_topic]['continuous']
-        odom_stamps = data[odo_topic]['timestamps']
+        # optional control topics
+        have_cbf = u_ref_topic in data and u_safe_topic in data
+        if have_cbf:
+            u_ref_msgs   = data[u_ref_topic]['continuous']
+            u_ref_stamps = data[u_ref_topic]['timestamps']
+            u_safe_msgs  = data[u_safe_topic]['continuous']
+            u_safe_stamps= data[u_safe_topic]['timestamps']
 
-        # --------------- parameters -----------------
+        # --------------- parameters ----------------------------------
         every_n        = int(self.params.get('sample_every_n',       10))
         max_dt_ns      = int(self.params.get('max_time_diff', 0.05) * 1e9)
         max_pts_cloud  = int(self.params.get('max_points_per_cloud', 5000))
-        cmap_name      = self.params.get('cmap', 'viridis')
-        
-        # Add axis limit parameters
-        axis_limits    = self.params.get('axis_limits', None)  # {'x': [-5, 5], 'y': [-5, 5], 'z': [-2, 2]}
-        view_angle     = self.params.get('view_angle', None)   # {'elev': 20, 'azim': -60}
+        cmap_name      = self.params.get('cmap',            'viridis')
+        point_size     = int(self.params.get('point_size',           8))
+        dist_thresh    = self.params.get('distance_threshold',    None)
+        axis_limits    = self.params.get('axis_limits',           None)
+        view_angle     = self.params.get('view_angle',            None)
 
-        agg_points     = []       # all transformed xyz points
-        path_positions = []       # vehicle position for each cloud (odom frame)
-
+        # --------------- aggregate point-cloud -----------------------
+        agg_points     = []
+        path_pos_cloud = []          # pose for each *used* cloud
         for i in range(0, len(pc_msgs), every_n):
-            pc_msg   = pc_msgs[i]
-            pc_stamp = pc_stamps[i]
+            pc_msg, pc_stamp = pc_msgs[i], pc_stamps[i]
 
-            # -- match odometry pose ------------------------------------
+            # ---- match odometry pose --------------------------------
             j = self._find_closest_msg(odom_stamps, pc_stamp, max_dt_ns)
             if j is None:
                 continue
             p_odom, R_odom = self._pose_from_odom(odom_msgs[j])
-            path_positions.append(p_odom)
+            path_pos_cloud.append(p_odom)
 
-            # -- read xyz from PointCloud2 ------------------------------
+            # ---- read xyz -------------------------------------------
             xyz = self._xyz_from_cloud(pc_msg)
             if xyz.size == 0:
                 continue
-            # down-sample each cloud (uniform random)
             if xyz.shape[0] > max_pts_cloud:
-                idx_sel = np.random.choice(xyz.shape[0], max_pts_cloud, replace=False)
-                xyz = xyz[idx_sel]
+                xyz = xyz[np.random.choice(xyz.shape[0],
+                                           max_pts_cloud, replace=False)]
+            xyz_odom = R_odom.apply(xyz) + p_odom          # → odom frame
 
-            # -- transform to odom frame --------------------------------
-            xyz_odom = R_odom.apply(xyz) + p_odom
-            agg_points.append(xyz_odom)
+            # ---- distance filter (optional) -------------------------
+            if dist_thresh is not None:
+                mask = np.linalg.norm(xyz_odom, axis=1) <= dist_thresh
+                xyz_odom = xyz_odom[mask]
+            if xyz_odom.size:
+                agg_points.append(xyz_odom)
 
         if not agg_points:
             print("[PointCloudPath] no valid data collected.")
             return
 
         agg_points     = np.concatenate(agg_points, axis=0)
-        path_positions = np.vstack(path_positions)
+        path_pos_cloud = np.vstack(path_pos_cloud)
 
-        # --------------- plot ------------------------------------------
+        # --------------- full path & CBF correction ------------------
+        path_all   = []
+        corr_vals  = []              # ‖u_safe - u_ref‖
+        for k, odom_msg in enumerate(odom_msgs):
+            p_odom, _ = self._pose_from_odom(odom_msg)
+            path_all.append(p_odom)
+
+            if have_cbf:
+                t_stamp = odom_stamps[k]
+                ir = self._find_closest_msg(u_ref_stamps,  t_stamp, max_dt_ns)
+                is_ = self._find_closest_msg(u_safe_stamps, t_stamp, max_dt_ns)
+
+                if ir is not None and is_ is not None:
+                    u_ref_vec   = np.array([
+                        u_ref_msgs[ir].twist.linear.x,
+                        u_ref_msgs[ir].twist.linear.y,
+                        u_ref_msgs[ir].twist.linear.z])
+                    u_safe_vec  = np.array([
+                        u_safe_msgs[is_].twist.linear.x,
+                        u_safe_msgs[is_].twist.linear.y,
+                        u_safe_msgs[is_].twist.linear.z])
+                    corr_vals.append(np.linalg.norm(u_safe_vec - u_ref_vec))
+                else:
+                    corr_vals.append(np.nan)   # no data
+            else:
+                corr_vals.append(np.nan)
+
+        path_all  = np.vstack(path_all)
+        corr_vals = np.array(corr_vals)
+        # replace NaN (no data) by 0 so that they appear in colour-scale
+        corr_vals[np.isnan(corr_vals)] = 0.0
+
+        # --------------- plot ----------------------------------------
         fig = plt.figure(figsize=(10, 8))
         ax  = fig.add_subplot(111, projection='3d')
 
-        # point-cloud (light grey)
-        ax.scatter(agg_points[:, 0],
-                   agg_points[:, 1],
-                   agg_points[:, 2],
-                   s=1, c='lightgrey', alpha=0.4)
+        # --- aggregated cloud ---------------------------------------
+        ax.scatter(agg_points[:, 0], agg_points[:, 1], agg_points[:, 2],
+                   s=point_size, c='lightgrey', alpha=0.4)
 
-        # path – colour by flight time
-        t_rel = np.linspace(0.0, 1.0, len(path_positions))
-        path_sc = ax.scatter(path_positions[:, 0],
-                             path_positions[:, 1],
-                             path_positions[:, 2],
-                             c=t_rel, cmap=cmap_name, s=15)
-        ax.plot(path_positions[:, 0],
-                path_positions[:, 1],
-                path_positions[:, 2],
-                color='red', linewidth=2, alpha=0.8)
+        # --- colourised path ----------------------------------------
+        # build line segments
+        segments = np.stack([path_all[:-1], path_all[1:]], axis=1)
+        norm     = Normalize(vmin=np.min(corr_vals), vmax=np.max(corr_vals))
+        lc       = Line3DCollection(segments, cmap=cmap_name, norm=norm,
+                                    linewidths=2)
+        lc.set_array(corr_vals[1:])      # colour by correction
+        ax.add_collection(lc)
 
-        cb = fig.colorbar(path_sc, ax=ax, fraction=0.03, pad=0.07)
-        cb.set_label("relative time", fontsize=12)
+        # colourbar ---------------------------------------------------
+        cb = fig.colorbar(lc, ax=ax, fraction=0.03, pad=0.07)
+        cb.set_label("‖u_safe − u_ref‖  [$m/s^2$]", fontsize=12)
 
-        # Set axis limits if specified
+        # optional axis limits / view
         if axis_limits:
-            if 'x' in axis_limits:
-                ax.set_xlim(axis_limits['x'])
-            if 'y' in axis_limits:
-                ax.set_ylim(axis_limits['y'])
-            if 'z' in axis_limits:
-                ax.set_zlim(axis_limits['z'])
-
-        # Set view angle if specified
+            ax.set_xlim(axis_limits.get('x', ax.get_xlim()))
+            ax.set_ylim(axis_limits.get('y', ax.get_ylim()))
+            ax.set_zlim(axis_limits.get('z', ax.get_zlim()))
         if view_angle:
-            elev = view_angle.get('elev', None)
-            azim = view_angle.get('azim', None)
-            ax.view_init(elev=elev, azim=azim)
+            ax.view_init(elev=view_angle.get('elev', None),
+                         azim=view_angle.get('azim', None))
 
         ax.set_title("Quadrotor trajectory through aggregated point-cloud",
                      fontsize=14)
         ax.set_xlabel("X [m]"); ax.set_ylabel("Y [m]"); ax.set_zlabel("Z [m]")
-        ax.set_box_aspect([1, 1, 1])
-        ax.grid(False)
-
+        ax.set_box_aspect([1, 1, 1]); ax.grid(False)
         plt.tight_layout()
+
         fig_path = output_dir / "pointcloud_path_viz.pdf"
-        plt.show()
         plt.savefig(fig_path, dpi=300, bbox_inches='tight')
         plt.close(fig)
-
         print(f"[PointCloudPath] saved {fig_path}")
 
 class ProcessorFactory:
