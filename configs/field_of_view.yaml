@@ -7,7 +7,7 @@ bag_processing:
 
   interval:
     start: 217
-    end: 220.1
+    end: 221
     highlights: [217, 218, 219, 220]
 
 processors:
@@ -19,10 +19,13 @@ processors:
       color_image: "/color_image"
     params:
       filename_prefix: "color_image_"
+      generate_video: true            # Enable video
+      video_filename: "color_output_video.mp4"
+      video_fps: 30
 
 
   min_cbf_plot:
-    enabled: true
+    enabled: false
     type: "min_cbf_plot"
     input_mappings:
       v_0: "/raw_psi_image"
@@ -32,7 +35,7 @@ processors:
 
 
   u_safety_error_plot:
-    enabled: true
+    enabled: false
     type: "u_safety_error_plot"
     input_mappings:
       #u_ref: "/input_viz"
@@ -42,7 +45,7 @@ processors:
 
 
   u_ref_error_plot:
-    enabled: true
+    enabled: false
     type: "u_ref_error_plot"
     input_mappings:
       u_ref: "/input_viz"
@@ -52,7 +55,7 @@ processors:
 
 
   u_sizes_plot:
-    enabled: true
+    enabled: false
     type: "u_sizes_plot"
     input_mappings:
       u_ref: "/input_viz"
@@ -61,13 +64,13 @@ processors:
       u_actual: "/mavros/setpoint_raw/local_viz"
 
   velocity_size_plot:
-    enabled: true
+    enabled: false
     type: "velocity_size_plot"
     input_mappings:
       odometry: "/rig_node/odometry"
 
   snapshot_visualization:
-    enabled: true
+    enabled: false
     type: "snapshot_visualization"
     input_mappings:
       sceneflow: "/scene_flow_processed"
@@ -81,8 +84,8 @@ processors:
         y: [-1, 1]
         z: [-0.75, 1.25]
       view_angle:
-        elev: 0
-        azim: 90
+        elev: 35
+        azim: 100
         roll: 0
       filename_prefix: "processed_"
       max_distance: 3.5
@@ -90,7 +93,7 @@ processors:
       max_flow_vectors: 1000
 
   cbf_value_image:
-    enabled: true
+    enabled: false
     type: "cbf_value_image"
     input_mappings:
       v_0: '/psi_image'
@@ -99,7 +102,7 @@ processors:
       filename_prefix: "cbf_value_"
 
   time_series_vectors:
-    enabled: true
+    enabled: false
     type: "time_series_vector_visualization"
     input_mappings:
       u_ref: "/input_viz"
@@ -120,8 +123,35 @@ processors:
       filename_prefix: "control_vectors"
 
   angular_velocity_plot:
-    enabled: true
+    enabled: false
     type: "angular_velocity_size_plot"
     input_mappings:
       odometry: "/rig_node/odometry"
     params:
+
+  pc_path:
+    enabled: true
+    type: pointcloud_path_visualization
+    params:
+      sample_every_n:       5          # use every 5-th cloud
+      max_time_diff:        0.05       # s, cloud ↔ odom sync tolerance
+      max_points_per_cloud: 8000
+      cmap: viridis
+      axis_limits:
+        x: [1.0, 3.0]  # X-axis limits in meters
+        y: [-2.0, -1.0]    # Y-axis limits in meters  
+        z: [1.0, 2.5]    # Z-axis limits in meters
+      sample_every_n     : 5
+      distance_threshold : 3.5
+      point_size         : 15
+      point_color_by     : time        # or 'distance', 'constant'
+      point_cmap         : winter
+      point_cmap_padding : -0.05
+      path_linewidth     : 5.0         # thicker line
+      cmap               : inferno     # for CBF correction
+      view_angle         : {elev: 80, azim: 70}
+    input_mappings:
+      point_cloud: /depth_point_cloud
+      odometry:    /rig_node/odometry
+      u_ref: "/input_viz"
+      u_safe: "/control_vector_viz_unfiltered"
