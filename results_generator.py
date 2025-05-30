@@ -14,7 +14,72 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d import Axes3D
 import scipy as sp
+import os # Added for path operations in video creation
+import tempfile
 
+class VideoCreatorUtil:
+    @staticmethod
+    def create_video_from_timed_images(
+        image_frames_with_times: List[Tuple[Path, float]], # List of (image_path, timestamp_in_seconds)
+        output_video_path: Path,
+        fps: float,
+        duration_sec: float,
+        logger=print
+    ):
+        """
+        Creates a video from images, adjusting frame display time based on timestamps.
+
+        Args:
+            image_frames_with_times: A list of tuples, where each tuple is (Path_to_image, timestamp_in_seconds).
+                                     The list should be sorted by timestamp.
+            output_video_path: Path to save the output video file.
+            fps: Frames per second for the output video.
+            duration_sec: Duration (in seconds) to display the last frame.
+            logger: Logger function (defaults to print).
+        """
+        if not image_frames_with_times:
+            logger(f"No image frames provided for video {output_video_path}")
+            return
+
+        # Ensure sorted by timestamp, though processors should provide it sorted.
+        # This sort is crucial for correct duration calculation.
+        image_frames_with_times.sort(key=lambda x: x[1])
+
+        try:
+            first_frame_img = cv2.imread(str(image_frames_with_times[0][0]))
+            if first_frame_img is None:
+                logger(f"Error: Could not read the first image frame: {image_frames_with_times[0][0]} for video {output_video_path}")
+                return
+            height, width, _ = first_frame_img.shape
+        except Exception as e:
+            logger(f"Error reading first image dimensions from {image_frames_with_times[0][0]}: {e}")
+            return
+        
+        print(f"Duration of video: {duration_sec} seconds")
+
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        output_video_path.parent.mkdir(parents=True, exist_ok=True)
+        video_writer = cv2.VideoWriter(str(output_video_path), fourcc, fps, (width, height))
+
+        # Loop all frames of video
+
+        for frame_idx in range(int(duration_sec * fps)):
+
+            print(f"Frame {frame_idx} of {int(duration_sec * fps)}")
+
+            frame_time_in_s = frame_idx / fps
+
+            # Find the closest image frame to the current frame time
+            closest_frame_time = min(image_frames_with_times, key=lambda x: abs(x[1] - frame_time_in_s))
+
+            # Get the image frame
+            img_path, _ = closest_frame_time
+
+            frame_img = cv2.imread(str(img_path))
+
+            video_writer.write(frame_img)
+
+        video_writer.release()
 
 def softmin(x: np.ndarray, k: float = 1.0):
     ins = - k * x
@@ -184,27 +249,82 @@ class ImageProcessor(Processor):
 
         topic = input_mappings.get('color_image')
 
-        if not topic or topic not in data:
+        if not topic or topic not in data or not data[topic]['continuous']:
+            print(f"ImageProcessor: Topic '{topic}' not found, not specified, or has no continuous data.")
             return
 
-        # Process highlighted frames
-        for idx in data[topic]['highlights']:
-            msg = data[topic]['continuous'][idx]
-            ts = convert_bag_time_in_nanoseconds_to_seconds(data[topic]['bag_start'], msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9)
-            self._save_image(msg, ts, output_dir)
+        image_output_dir = output_dir / (self.params.get('filename_prefix', 'img_') + "color_images")
+        image_output_dir.mkdir(parents=True, exist_ok=True)
 
-    def _save_image(self, msg, timestamp, output_dir):
+        timed_image_frames: List[Tuple[Path, float]] = []
         
-        filename = f"{self.params['filename_prefix']}{timestamp:.2f}.png"
+        source_messages = data[topic]['continuous']
+        source_timestamps_ns = data[topic]['timestamps']
+
+        if len(source_messages) != len(source_timestamps_ns):
+            print(f"ImageProcessor: Mismatch between continuous messages ({len(source_messages)}) and timestamps ({len(source_timestamps_ns)}) for topic {topic}. Skipping video generation.")
+            return
+
+        print(f"ImageProcessor: Processing {len(source_messages)} continuous frames for video from topic {topic}.")
+        source_messages_first_timestamp_ns = source_timestamps_ns[0]
+
+        indexes = range(len(source_messages)) if self.params.get("generate_video", False) else data[topic]['highlights']
+
+        temp_files = []
+
+        for i in indexes:
+            msg = source_messages[i]
+            timestamp_ns = source_timestamps_ns[i]
+            time_in_s_absolute = (timestamp_ns - source_messages_first_timestamp_ns) / 1e9
+
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            temp_file_path = Path(temp_file.name)
+            temp_files.append(temp_file)
+
+            filename = f"{self.params.get('filename_prefix', 'img_')}{time_in_s_absolute:.3f}.png" # Use more precision for unique names
+
+            # Check if we are in the highlights
+            if i in data[topic]['highlights']:
+                self._save_image(msg, image_output_dir / filename)
+
+            saved_path = self._save_image(msg, temp_file_path)
+            if saved_path:
+                timed_image_frames.append((saved_path, time_in_s_absolute))
+            if (i + 1) % 100 == 0: # Log progress
+                 print(f"ImageProcessor: Saved {i+1}/{len(source_messages)} frames for video...")
+
+
+        if self.params.get("generate_video", False):
+            video_filename = self.params.get("video_filename", "color_image_video.mp4")
+            video_fps = float(self.params.get("video_fps", 10.0)) # FPS for the output video
+
+            output_video_path = output_dir / video_filename
+            
+            VideoCreatorUtil.create_video_from_timed_images(
+                image_frames_with_times=timed_image_frames,
+                output_video_path=output_video_path,
+                fps=video_fps,
+                duration_sec=timed_image_frames[-1][1] - timed_image_frames[0][1],
+                logger=print
+            )
+
+        # Delete temp files
+        for temp_file in temp_files:
+            temp_file.close()
+
+    def _save_image(self, msg, output_path) -> Union[Path, None]:
+        
         img = np.frombuffer(msg.data, np.uint8).reshape(msg.height, msg.width, -1)
         
         if msg.encoding in self.conversions and self.conversions[msg.encoding]:
             img = cv2.cvtColor(img, self.conversions[msg.encoding])
+        try:
+            cv2.imwrite(str(output_path), img)
+            return output_path
+        except Exception as e:
+            print(f"Error saving image {output_path}: {e}")
+            return None
 
-        output_dir = output_dir / (self.params['filename_prefix'] + "color_images")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        cv2.imwrite(str(output_dir / filename), img)
 
 class MinCBFPlotProcessor(Processor):
 

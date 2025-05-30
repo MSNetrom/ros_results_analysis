@@ -6,8 +6,8 @@ bag_processing:
   max_time_diff: 0.1  # Max allowed time difference in seconds
 
   interval:
-    start: 72
-    end: 74
+    start: 71.5
+    end: 75
     highlights: [72, 72.5, 72.75, 73, 73.25, 73.5, 73.75, 74]
 
 processors:
@@ -19,6 +19,9 @@ processors:
       color_image: "/color_image"
     params:
       filename_prefix: "color_image_"
+      generate_video: true            # Enable video
+      video_filename: "color_output_video.mp4"
+      video_fps: 30
 
 
   min_cbf_plot:
