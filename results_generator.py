@@ -522,7 +522,7 @@ class USafetyErrorPlotProcessor(Processor):
         plt.legend(fontsize=14)
         plt.xlabel("Time [s]", fontsize=14)
         plt.ylabel("Distance [$m/s^2$]", fontsize=14)
-        plt.title("Difference between safe and filtered/final control vector", fontsize=14)
+        #plt.title("Difference between safe and filtered/final control vector", fontsize=14)
         plt.xticks(fontsize=12)
         plt.yticks(fontsize=12)
         plt.grid(True)
@@ -533,39 +533,127 @@ class USafetyErrorPlotProcessor(Processor):
 class URefErrorPlotProcessor(USafetyErrorPlotProcessor):
 
     def process(self, data, input_mappings, output_dir):
+        # ------------------------------------------------------------------
+        # create output directory
+        # ------------------------------------------------------------------
         Processor.process(self, data, input_mappings, output_dir)
 
-        u_ref = data[input_mappings['u_ref']]['continuous']
-        u_safe = data[input_mappings['u_safe']]['continuous']
-        u_filtered = data[input_mappings['u_filtered']]['continuous']
-        u_actual = data[input_mappings['u_actual']]['continuous']
+        # ------------------------------------------------------------------
+        # fetch messages ----------------------------------------------------
+        # ------------------------------------------------------------------
+        topic_ref      = input_mappings['u_ref']
+        topic_safe     = input_mappings['u_safe']
+        topic_filtered = input_mappings['u_filtered']
+        topic_actual   = input_mappings['u_actual']
 
-        u_ref_values = self._extract_values_from_message(u_ref)
-        u_safe_values = self._extract_values_from_message(u_safe)
-        u_filtered_values = self._extract_values_from_message(u_filtered)
-        u_actual_values = self._extract_values_from_message(u_actual)
+        u_ref      = data[topic_ref     ]['continuous']
+        u_safe     = data[topic_safe    ]['continuous']
+        u_filtered = data[topic_filtered]['continuous']
+        u_actual   = data[topic_actual  ]['continuous']
 
-        distance_safe = np.linalg.norm(u_ref_values - u_safe_values, axis=1)
-        distance_filtered = np.linalg.norm(u_ref_values - u_filtered_values, axis=1)
-        distance_actual = np.linalg.norm(u_ref_values - u_actual_values, axis=1)
+        # ------------------------------------------------------------------
+        # distances ---------------------------------------------------------
+        # ------------------------------------------------------------------
+        u_ref_vals      = self._extract_values_from_message(u_ref)
+        u_safe_vals     = self._extract_values_from_message(u_safe)
+        u_filtered_vals = self._extract_values_from_message(u_filtered)
+        u_actual_vals   = self._extract_values_from_message(u_actual)
 
-        timestamps = self.get_timestamps_of_message_list(u_ref, data[input_mappings['u_ref']]['bag_start'])
+        dist_safe     = np.linalg.norm(u_ref_vals - u_safe_vals,     axis=1)
+        dist_filtered = np.linalg.norm(u_ref_vals - u_filtered_vals, axis=1)
+        dist_actual   = np.linalg.norm(u_ref_vals - u_actual_vals,   axis=1)
 
+        # timestamps ( t=0 @ first msg )
+        timestamps = self.get_timestamps_of_message_list(
+            u_ref, data[topic_ref]['bag_start'])
+
+        # ------------------------------------------------------------------
+        # static PDF --------------------------------------------------------
+        # ------------------------------------------------------------------
         plt.figure(figsize=(12, 4))
-        plt.plot(timestamps, distance_safe, label="Safe", color=COLORS["u_safe"], linewidth=2)
-        plt.plot(timestamps, distance_filtered, label="Filtered", color=COLORS["u_filtered"], linewidth=2)
-        plt.plot(timestamps, distance_actual, label="Final (clamped)", color=COLORS["u_actual"], linewidth=2)
-        plt.legend(fontsize=14)
-        plt.xlabel("Time [s]", fontsize=14)
-        plt.ylabel("Distance [$m/s^2$]", fontsize=14)
-        plt.title("Difference between reference and safe/filtered/final control vector", fontsize=14)
-        plt.xticks(fontsize=12)
-        plt.yticks(fontsize=12)
-        plt.grid(True)
+        plt.plot(timestamps, dist_safe,     label="Safe",     color=COLORS["u_safe"    ], lw=2)
+        plt.plot(timestamps, dist_filtered, label="Filtered", color=COLORS["u_filtered"], lw=2)
+        plt.plot(timestamps, dist_actual,   label="Final (clamped)",
+                                            color=COLORS["u_actual" ], lw=2)
 
-        plt.savefig(output_dir / "u_ref_error_plot.pdf", bbox_inches='tight')
+        # highlight markers (letters A, B, …)
+        for i, idx in enumerate(data[topic_ref]['highlights']):
+            plt.axvline(x=timestamps[idx], color='red', lw=1.5)
+            plt.text(timestamps[idx], plt.ylim()[1]*1.01,
+                     alphabet[i], fontsize=14, ha='center', va='bottom')
+
+        plt.legend(fontsize=14)
+        plt.xlabel("Time [s]",           fontsize=14)
+        plt.ylabel("Distance [$m/s^2$]", fontsize=14)
+        #plt.title("Difference between reference and "
+        #          "safe/filtered/final control vector", fontsize=14)
+        plt.xticks(fontsize=12); plt.yticks(fontsize=12); plt.grid(True)
+
+        pdf_path = output_dir / "u_ref_error_plot.pdf"
+        plt.savefig(pdf_path, bbox_inches='tight')
         plt.close()
-        
+        print(f"[URefErrorPlot] saved {pdf_path}")
+
+        # ------------------------------------------------------------------
+        # optional VIDEO ----------------------------------------------------
+        # ------------------------------------------------------------------
+        if not self.params.get("generate_video", False):
+            return
+
+        fps        = float(self.params.get("video_fps",      10.0))
+        video_name =        self.params.get("video_filename", "u_ref_error_video.mp4")
+        video_path = output_dir / video_name
+
+        # ---------- figure template (static curves) -----------------------
+        fig, ax = plt.subplots(figsize=(12, 4))
+        ax.plot(timestamps, dist_safe,     label="Safe",  color=COLORS["u_safe"    ], lw=2)
+        ax.plot(timestamps, dist_filtered, label="Filtered", color=COLORS["u_filtered"], lw=2)
+        ax.plot(timestamps, dist_actual,   label="Final (clamped)", color=COLORS["u_actual"], lw=2)
+
+        # negative-fill identical to static plot (optional – remove if not wanted)
+        ax.set_xlabel("Time [s]",           fontsize=14)
+        ax.set_ylabel("Distance [$m/s^2$]", fontsize=14)
+        ax.set_title("Reference distance to other control vectors", fontsize=14)
+        ax.grid(True); ax.legend(fontsize=14)
+        ax.tick_params(labelsize=12)
+
+        # highlight letters (static)
+        for i, idx in enumerate(data[topic_ref]['highlights']):
+            ax.text(timestamps[idx], ax.get_ylim()[1]*1.01,
+                    alphabet[i], fontsize=14, ha='center', va='bottom')
+
+        # vertical marker (will be animated)
+        marker = ax.axvline(x=timestamps[0], color='red', lw=1.5)
+
+        # ---------- create frames ----------------------------------------
+        tmp_files, timed_frames = [], []
+        start_t = timestamps[0]
+
+        for t in timestamps:
+            marker.set_xdata([t, t])
+            fig.canvas.draw_idle()
+
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            fig.savefig(tmp.name, dpi=200, bbox_inches='tight')
+            tmp_files.append(tmp)
+            timed_frames.append((Path(tmp.name), t - start_t))
+
+        plt.close(fig)
+
+        # ---------- video stitching --------------------------------------
+        VideoCreatorUtil.create_video_from_timed_images(
+            image_frames_with_times = timed_frames,
+            output_video_path       = video_path,
+            fps                     = fps,
+            duration_sec            = timed_frames[-1][1] - timed_frames[0][1],
+            logger                  = print
+        )
+
+        # cleanup ---------------------------------------------------------
+        for f in tmp_files:
+            f.close()
+        print(f"[URefErrorPlot] video saved to {video_path}")
+
 class USizesPlotProcessor(USafetyErrorPlotProcessor):
 
     def process(self, data, input_mappings, output_dir):
