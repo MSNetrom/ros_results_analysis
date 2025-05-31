@@ -8,12 +8,12 @@ bag_processing:
   interval:
     start: 72
     end: 74.5
-    highlights: [73, 74]
+    highlights: [72.8, 72.9, 73.4]
 
 processors:
 
   color_image:
-    enabled: false
+    enabled: true
     type: "image"
     input_mappings:
       color_image: "/color_image"
@@ -32,6 +32,7 @@ processors:
       v_1: "/raw_h_image"
     params:
       k: 30.0
+      y_limits: [null, 4.0]
       generate_video: true            # Enable video
       video_filename: "min_cbf_plot_video.mp4"
       video_fps: 30
@@ -73,7 +74,7 @@ processors:
       odometry: "/rig_node/odometry"
 
   snapshot_visualization:
-    enabled: false
+    enabled: true
     type: "snapshot_visualization"
     input_mappings:
       sceneflow: "/scene_flow_processed"
@@ -87,8 +88,8 @@ processors:
         y: [-1, 1]
         z: [-0.75, 1.25]
       view_angle:
-        elev: 10
-        azim: 105
+        elev: 20
+        azim: 120
         roll: 0
       filename_prefix: "processed_"
       max_distance: 3.5
@@ -108,14 +109,14 @@ processors:
         y: [-1, 1]
         z: [-1, 2.5]
       view_angle:
-        elev: 0
-        azim: 180
+        elev: 20
+        azim: 200
         roll: 90
       filename_prefix: "raw_"
       max_distance: 3.5
 
   cbf_value_image:
-    enabled: false
+    enabled: true
     type: "cbf_value_image"
     input_mappings:
       v_0: '/psi_image'
@@ -128,7 +129,7 @@ processors:
 
 
   pc_path:
-    enabled: false
+    enabled: true
     type: pointcloud_path_visualization
     params:
       sample_every_n:       5          # use every 5-th cloud
@@ -147,12 +148,14 @@ processors:
       path_linewidth     : 5.0         # thicker line
       cmap               : inferno     # for CBF correction
       view_angle         : {elev: 15, azim: 105}
+      u_scaling_factor: 0.25
     input_mappings:
       point_cloud: /depth_point_cloud
       odometry:    /rig_node/odometry
       u_ref: "/input_viz"
       u_safe: "/control_vector_viz_unfiltered"
-      
+      u_filtered: "/control_vector_viz_raw"
+      u_actual: "/mavros/setpoint_raw/local_viz"
 
   time_series_vectors:
     enabled: false
@@ -175,7 +178,7 @@ processors:
       filename_prefix: "control_vectors"
 
   angular_velocity_plot:
-    enabled: false
+    enabled: true
     type: "angular_velocity_size_plot"
     input_mappings:
       odometry: "/rig_node/odometry"

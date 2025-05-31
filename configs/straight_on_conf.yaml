@@ -8,7 +8,7 @@ bag_processing:
   interval:
     start: 343
     end: 346.5
-    highlights: [343, 344, 345, 346]
+    highlights: [343.75, 344.5, 345.4]
 
 processors:
 
@@ -19,16 +19,22 @@ processors:
       color_image: "/color_image"
     params:
       filename_prefix: "color_image_"
+      generate_video: true            # Enable video
+      video_filename: "color_output_video.mp4"
+      video_fps: 30
 
 
   min_cbf_plot:
-    enabled: false
+    enabled: true
     type: "min_cbf_plot"
     input_mappings:
       v_0: "/raw_psi_image"
       v_1: "/raw_h_image"
     params:
       k: 30.0
+      generate_video: true            # Enable video
+      video_filename: "min_cbf_plot_video.mp4"
+      video_fps: 30
 
 
   u_safety_error_plot:
@@ -67,7 +73,7 @@ processors:
       odometry: "/rig_node/odometry"
 
   snapshot_visualization:
-    enabled: false
+    enabled: true
     type: "snapshot_visualization"
     input_mappings:
       sceneflow: "/scene_flow_processed"
@@ -88,15 +94,21 @@ processors:
       max_distance: 3.5
       u_scaling_factor: 0.5
       max_flow_vectors: 400
+      generate_video: true            # Enable video
+      video_filename: "snapshot_viz_video.mp4"
+      video_fps: 30
 
   cbf_value_image:
-    enabled: false
+    enabled: true
     type: "cbf_value_image"
     input_mappings:
       v_0: '/psi_image'
       v_1: '/h_image'
     params:
       filename_prefix: "cbf_value_"
+      generate_video: true            # Enable video
+      video_filename: "cbf_value_video.mp4"
+      video_fps: 30
 
   time_series_vectors:
     enabled: false
@@ -121,7 +133,7 @@ processors:
       filename_prefix: "control_vectors"
 
   angular_velocity_plot:
-    enabled: false
+    enabled: true
     type: "angular_velocity_size_plot"
     input_mappings:
       odometry: "/rig_node/odometry"

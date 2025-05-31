@@ -395,6 +395,10 @@ class MinCBFPlotProcessor(Processor):
         plt.plot(timestamps, softmin_v_1_values,
                  label="$\phi=softmin(h_1, \\ldots, h_n)$", linewidth=2)
         
+        # Set y-limits
+        y_limits = self.params.get('y_limits', [None, None])
+        plt.ylim(bottom=y_limits[0], top=y_limits[1])
+        
         # Add fill for negative portions
         fill_alpha = self.params.get('negative_fill_alpha', 0.3)
         plt.fill_between(timestamps, v_0_values, 0, where=(v_0_values < 0), 
@@ -430,6 +434,10 @@ class MinCBFPlotProcessor(Processor):
 
         # ── pre-create figure & constant lines (no re-plotting) ───────────────
         fig, ax = plt.subplots(figsize=(12, 4))
+
+        # Set y-limits
+        y_limits = self.params.get('y_limits', [None, None])
+
         l1, = ax.plot(timestamps, v_0_values, label="$\psi_{min}$", linewidth=2)
         l2, = ax.plot(timestamps, v_1_values, label="$h_{min}$",  linewidth=2)
         l3, = ax.plot(timestamps, softmin_v_1_values,
@@ -442,6 +450,8 @@ class MinCBFPlotProcessor(Processor):
                        color='blue', alpha=fill_alpha, interpolate=True)
         ax.fill_between(timestamps, softmin_v_1_values, 0, where=(softmin_v_1_values < 0), 
                        color='orange', alpha=fill_alpha, interpolate=True)
+        
+        ax.set_ylim(bottom=y_limits[0], top=y_limits[1])
         
         ax.set_xlabel("Time [s]", fontsize=14)
         ax.set_ylabel("Value",     fontsize=14)
@@ -817,7 +827,7 @@ class SnapshotVisualizationProcessor(Processor):
         sceneflow_highlights = data[sceneflow_topic]['highlights']
         sceneflow_messages = data[sceneflow_topic]['continuous']
 
-        indexes = range(len(sceneflow_messages)) if self.params.get("generate_video", False) else sceneflow_highlights
+        indexes = range(len(sceneflow_messages)-1) if self.params.get("generate_video", False) else sceneflow_highlights
         #timestamps = self.get_timestamps_of_message_list(sceneflow_messages, data[sceneflow_topic]['bag_start'])
 
         temp_files = []
@@ -845,6 +855,8 @@ class SnapshotVisualizationProcessor(Processor):
             except Exception as e:
                 print(f"Error extracting sceneflow at t={timestamp:.2f}: {e}")
                 continue
+
+            print(f"Ref u length: {len(data[u_ref_topic]['continuous'])}")
             
             # Extract reference vector if available
             u_ref_vec = self._extract_control_vector(data[u_ref_topic]['continuous'][idx]) if u_ref_topic is not None else None
