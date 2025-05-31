@@ -48,7 +48,7 @@ processors:
 
 
   u_ref_error_plot:
-    enabled: false
+    enabled: true
     type: "u_ref_error_plot"
     input_mappings:
       u_ref: "/input_viz"
