@@ -68,7 +68,7 @@ processors:
       u_actual: "/mavros/setpoint_raw/local_viz"
 
   velocity_size_plot:
-    enabled: false
+    enabled: true
     type: "velocity_size_plot"
     input_mappings:
       odometry: "/rig_node/odometry"
