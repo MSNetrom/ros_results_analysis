@@ -812,7 +812,7 @@ class SnapshotVisualizationProcessor(Processor):
         # Plot point cloud
         if len(points) > 0:
             ax.scatter(points[:, 0], points[:, 1], points[:, 2],
-                      c='lightblue', s=5, alpha=0.6, marker='o', edgecolors='none')
+                      c='cornflowerblue', s=8, alpha=0.8, marker='o', edgecolors='none')
         
         # Plot flow vectors
         if len(flow_vectors) > 0:

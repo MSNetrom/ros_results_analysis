@@ -83,8 +83,8 @@ processors:
       u_actual: "/mavros/setpoint_raw/local_viz"
     params:
       axis_limits:
-        x: [-1.5, 2.5]
-        y: [-1, 1]
+        x: [-0, 2.5]
+        y: [-1, 0.25]
         z: [-0.75, 1.25]
       view_angle:
         elev: 45
