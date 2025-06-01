@@ -8,7 +8,7 @@ bag_processing:
   interval:
     start: 217.0
     end: 220.0
-    highlights: [218.9, 219.10, 219.40]
+    highlights: [219.10, 219.40]
 
 processors:
 
