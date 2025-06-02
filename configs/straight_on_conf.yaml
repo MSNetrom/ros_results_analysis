@@ -93,7 +93,7 @@ processors:
       filename_prefix: "processed_"
       max_distance: 3.5
       u_scaling_factor: 0.5
-      max_flow_vectors: 400
+      max_flow_vectors: 1000
       generate_video: true            # Enable video
       video_filename: "snapshot_viz_video.mp4"
       video_fps: 30
